@@ -7,11 +7,10 @@ from ..core.config import config
 
 logger = logging.getLogger(__name__)
 
-# 기존 SpeakNode의 무거운 HybridRAG를 버리고, 오직 유사도 검색에 특화된 가벼운 Vector 검색기
-class ShoeVectorRAG:
+# 단일 구조의 RAG 검색기 (유사도 검색 특화)
+class RingVectorRAG:
     """
-    가벼운 단일 구조의 RAG 검색기. (오버엔지니어링된 Cypher 생성 로직 50줄 통삭제)
-    단지 Chroma를 활용하여, 사용자 질문에 맞는 Qwen 통제 가이드 텍스트만 0.1초만에 찾아옴.
+    Chroma를 활용하여 사용자 질문에 맞는 Gemma 통제 가이드 및 반지 전문 지식을 찾아옴.
     """
     def __init__(self):
         self.embeddings = OllamaEmbeddings(
@@ -22,7 +21,7 @@ class ShoeVectorRAG:
         # db_feeder.py가 먼저 실행되었다는 가정 하에 로드
         if os.path.exists(config.VECTOR_DB_PATH):
             self.vector_store = Chroma(
-                collection_name="shoe_qwen_rules",
+                collection_name="ring_gemma_rules",
                 embedding_function=self.embeddings,
                 persist_directory=config.VECTOR_DB_PATH
             )
@@ -30,12 +29,12 @@ class ShoeVectorRAG:
             self.vector_store = None
             logger.warning("Vector DB not found! Please run `scripts/db_feeder.py` first.")
 
-    def search_shoe_rules(self, query: str, top_k: int = 3) -> str:
-        """가장 연관성이 높은 Qwen 프롬프트 팁이나 신발 소재 지식을 문자열로 반환"""
+    def search_ring_rules(self, query: str, top_k: int = 3) -> str:
+        """가장 연관성이 높은 반지 소재 지식이나 프롬프트 팁을 문자열로 반환"""
         if not self.vector_store:
-            return "No specific instructions found. Follow standard multi-angle prompt logic."
+            return "No specific instructions found. Follow standard jewelry prompting."
             
-        logger.info(f"ShoeVectorRAG searching for exact logic matching: '{query}'")
+        logger.info(f"RingVectorRAG searching for exact logic matching: '{query}'")
         
         try:
             # 단순 Vector Similarity Search 수행
@@ -52,15 +51,15 @@ class ShoeVectorRAG:
             return "Failure during context retrieval."
 
 # 노드 래퍼 함수 (State 반영용)
-def retrieve_shoe_context(state: AgentState) -> dict:
+def retrieve_ring_context(state: AgentState) -> dict:
     """
-    (Step 2 - Text Branch) 순수 Vector DB(Chroma)를 이용해 3D 규격용 맥락 주입.
+    (Step 2 - Text Branch) RingVectorRAG를 이용해 커플링 디자인용 맥락 확보.
     """
     prompt = state.get("user_prompt", "")
     logger.info("Executing Lightweight Vector RAG for Generative Rules...")
     
-    rag_engine = ShoeVectorRAG()
-    real_context = rag_engine.search_shoe_rules(prompt)
+    rag_engine = RingVectorRAG()
+    real_context = rag_engine.search_ring_rules(prompt)
     
     logger.success(f"Retrieved 3D Control Rules Length: {len(real_context)}")
     return {"rag_context": real_context}

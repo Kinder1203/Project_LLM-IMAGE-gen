@@ -5,36 +5,36 @@ from langchain_chroma import Chroma
 from langchain_ollama import OllamaEmbeddings
 from ..core.config import config
 
-# [B] 신발 디자인 도메인 전문 지식 (Shoe Terminology)
-SHOE_KNOWLEDGE_BASE = [
+# [B] 커플링/반지 공방 전문 지식 (Jewelry Terminology)
+RING_KNOWLEDGE_BASE = [
     {
-        "category": "Shoe_Design",
-        "title": "Upper Materials",
-        "content": "Leather provides structure and durability. Mesh provides breathability. Suede offers a premium matte finish but requires careful lighting. Flyknit/Primeknit offers a sock-like seamless fit."
+        "category": "Jewelry_Design",
+        "title": "Band Materials",
+        "content": "18k White Gold offers a sleek, modern look. Platinum is highly durable and hypoallergenic. Rose Gold provides a warm, romantic hue. Silver is affordable but requires maintenance against tarnishing."
     },
     {
-        "category": "Shoe_Design",
-        "title": "Midsole and Outsole Types",
-        "content": "A 'cupsole' is commonly found in lifestyle and skate shoes (e.g., Dunk, Air Force 1), providing a rigid, flat base. 'EVA foam' is used in running shoes for cushioning. A 'chunky sole' or 'platform sole' drastically increases the height of the shoe profile."
+        "category": "Jewelry_Design",
+        "title": "Gemstones and Engravings",
+        "content": "A 'Princess Cut' cubic gives a modern square silhouette, while a 'Round Brilliant' maximizes sparkle. Engravings should be specified explicitly, e.g., 'Engraved with the word Forever on the inner band'."
     }
 ]
 
-# [A] Qwen Multi-angle 공식 프롬프트 가이드 (템플릿 기반 통제 규칙)
-QWEN_PROMPT_GUIDES = [
+# [A] Gemma 커플링 3D 렌더링 프롬프트 가이드 (템플릿 제어 규칙)
+GEMMA_PROMPT_GUIDES = [
     {
-        "category": "Qwen_Multi_Angle_Prompting",
+        "category": "Gemma_Multi_Angle_Prompting",
         "title": "Azimuth (Horizontal Angle) Control",
-        "content": "To generate multiple views correctly with Qwen Multi-Angle, you must specify the camera horizontal angle in the prompt. Use exact keywords: 'front view' for 0 degrees, 'right side view' for 90 degrees, 'back view' for 180 degrees, and 'left side view' for 270 degrees. Do not use ambiguous terms like 'from the side'."
+        "content": "To generate multiple views of a ring, specify camera angles clearly: 'front view' (showing the main gem), 'side view' (profile of the band), and 'top-down view' (looking down at the ring)."
     },
     {
-        "category": "Qwen_Multi_Angle_Prompting",
-        "title": "Elevation (Vertical Angle) Control",
-        "content": "For 3D object rendering like shoes, default to 'eye-level shot' (0 degrees elevation) to prevent perspective distortion. Only use 'high-angle shot' if explicitly requested by the user to show the top of the shoe (e.g. the tongue or insole)."
+        "category": "Gemma_Multi_Angle_Prompting",
+        "title": "Modification and Inpainting Control",
+        "content": "When adding an engraving or a cubic to an existing ring, focus the prompt strictly on the added element: e.g., 'Add a small princess-cut diamond cubic to the center', 'Engrave initials inside the band'."
     },
     {
-        "category": "Qwen_Multi_Angle_Prompting",
+        "category": "Gemma_Multi_Angle_Prompting",
         "title": "Distance and Background",
-        "content": "Always append 'medium shot, isolated on solid white background, highly detailed' to the end of your Qwen prompt. This is mandatory for the TRELLIS 3D conversion pipeline."
+        "content": "Always append 'macro shot, highly detailed jewelry photography, solid white background' for consistency."
     }
 ]
 
@@ -56,13 +56,13 @@ def init_vector_db():
         
     # 2. Chroma DB 객체 연결
     vector_store = Chroma(
-        collection_name="shoe_qwen_rules",
+        collection_name="ring_gemma_rules",
         embedding_function=embedder,
         persist_directory=db_path
     )
     
     # 3. 문서화 및 임베딩 
-    all_docs = QWEN_PROMPT_GUIDES + SHOE_KNOWLEDGE_BASE
+    all_docs = GEMMA_PROMPT_GUIDES + RING_KNOWLEDGE_BASE
     texts = []
     metadatas = []
     
@@ -77,7 +77,7 @@ def init_vector_db():
     vector_store.add_texts(texts=texts, metadatas=metadatas)
     
     logger.success(f"Successfully ingested {len(all_docs)} foundational rules into ChromaDB.")
-    logger.info("Now the LLM Synthesizer will quickly fetch and exactly know how to prompt the Qwen model!")
+    logger.info("Now the LLM Synthesizer will quickly fetch and exactly know how to prompt the Gemma 4 model for Rings!")
 
 if __name__ == "__main__":
     init_vector_db()

@@ -1,53 +1,50 @@
+import json
+import logging
+from langchain_ollama import ChatOllama
+from langchain_core.messages import HumanMessage
 from ..core.schemas import AgentState
 from ..core.config import config
-from loguru import logger
-import json
-from langchain_ollama import ChatOllama
-from langchain_core.messages import SystemMessage, HumanMessage
+
+logger = logging.getLogger(__name__)
 
 def multimodal_intent_router(state: AgentState) -> dict:
     """
-    (Step 1) 사용자의 입력이 이미지인지 텍스트인지 판별하여 분기합니다. (Ollama 사용)
+    (Step 1) 입력된 이미지 URL과 Prompt 유무를 체크하여 초기 의도를 판별합니다.
     """
     input_type = state.get("input_type", "text")
-    logger.info(f"Router received input type: {input_type}")
+    prompt = state.get("user_prompt", "")
+    base_image = state.get("base_ring_image_url", "")
     
-    if input_type == "image":
-        return {"intent": "image_processing"}
-    else:
-        # SpeakNode 방식의 Ollama JSON 포맷 라우팅 적용
-        llm = ChatOllama(
-            model=config.OLLAMA_MODEL,
-            base_url=config.OLLAMA_BASE_URL,
-            temperature=0.0,
-            format="json"
-        )
+    logger.info(f"Router received input type: {input_type}, base_image: {'yes' if base_image else 'no'}, prompt: {'yes' if prompt else 'no'}")
+    
+    # 1. 이미지만 있고 텍스트가 없는 경우 (단순 다각도 분리)
+    if not prompt and base_image:
+        return {"intent": "multi_view_only"}
+    
+    # 2. 이미지도 있고 프롬프트(각인/수정 등)도 있는 경우
+    if base_image and prompt:
+        return {"intent": "partial_modification"}
         
-        prompt = state.get("user_prompt", "")
-        sys_prompt = '''You are a router. Analyze the user request about a shoe.
-Return exactly this JSON format: {"intent": "<intent>"}
-If asking to modify an existing design -> "text_modification"
-Otherwise -> "text_generation"'''
-        
-        try:
-            response = llm.invoke([
-                SystemMessage(content=sys_prompt),
-                HumanMessage(content=prompt)
-            ])
-            parsed = json.loads(response.content.strip())
-            intent = parsed.get("intent", "text_generation")
-        except Exception as e:
-            logger.warning(f"Ollama JSON parse failed: {e}")
-            intent = "text_generation"
-            
-        return {"intent": intent}
+    # 3. 그 외 (텍스트만 있음)
+    return {"intent": "full_custom"}
 
 def intent_router_condition(state: AgentState) -> str:
-    """ LangGraph 분기 결정을 리턴 """
+    """ LangGraph 초기 분기 """
     intent = state.get("intent", "")
-    if intent == "image_processing":
-        return "synthesizer" # (수정) preprocessor 삭제됨. 이미지 입력 시 3D 변환을 위해 곧장 다각도 생성기로 감.
-    elif intent in ["text_generation", "text_modification"]:
+    
+    if intent == "multi_view_only":
+        return "generate_multi_view" # 1단계를 모두 스킵하고 2단계 직행
+    elif intent == "partial_modification":
+        # 공방 시안 이미지 + 프롬프트
+        return "edit_image" 
+    elif intent == "full_custom":
+        # 백지 상태 텍스트
         return "rag_retriever"
     else:
-        return "end"
+        # User가 중단 후 나중에 보낸 승인/커스텀 리포트
+        if intent == "approved_base_only":
+            return "generate_multi_view"
+        elif intent == "user_requested_customization":
+            return "edit_image"
+        
+        return "generate_multi_view"
