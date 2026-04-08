@@ -110,3 +110,29 @@ def validate_rembg(state: AgentState) -> dict:
         "retry_count": retry_count + 1 if not is_valid else retry_count,
         "final_output_urls": urls if is_valid else []
     }
+
+def validate_input_image(state: AgentState) -> dict:
+    """ 시나리오 2/3 진입 시: 업로드된 시안 이미지의 배경(보색 대비)을 사전 검사하여 누끼 사고 방지 """
+    target_img = state.get("base_ring_image_url", "")
+    
+    sys_prompt = "You are a pre-processing judge. Check the image. Is the background color highly contrasting (complementary) to the ring's color to allow perfect alpha matting? If it's too similar (e.g., white ring on white background), output is_valid=false, and in 'reason', write EXACTLY a short directive for an inpainting model to fix it, like 'Change the background to solid pitch black'. Return JSON {'is_valid': true/false, 'reason': '...'}"
+    
+    logger.info("Guarding: Validating Input Image Contrast for Scenarios 2/3...")
+    result = _call_vision_judge(target_img, sys_prompt)
+    
+    
+    is_valid = result.get("is_valid", True)
+    reason = result.get("reason", "Good contrast.")
+    
+    update_dict = {
+        "is_valid": is_valid,
+        "validation_reason": reason
+    }
+    
+    if not is_valid:
+        current_prompt = state.get("customization_prompt", "")
+        # Append the AI's background fix instruction
+        new_prompt = f"{current_prompt} AND {reason}".strip(" AND ")
+        update_dict["customization_prompt"] = new_prompt
+        
+    return update_dict

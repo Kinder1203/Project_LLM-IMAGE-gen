@@ -63,9 +63,33 @@ def generate_base_image(state: AgentState) -> dict:
     user_prompt = state.get("user_prompt", "")
     rag_context = state.get("rag_context", "")
 
-    # Gemma로 프롬프트 고도화 로직 (여기서는 생략 및 간단히 래핑)
-    logger.info("Generating New Ring Design (Full Custom) with Background...")
+    logger.info("Enhancing Prompt using Gemma 4 & RAG rules...")
     
+    llm = ChatOllama(
+        model=config.OLLAMA_MODEL,
+        base_url=config.OLLAMA_BASE_URL,
+        temperature=0.3
+    )
+    
+    sys_prompt = f"""
+You are an expert jewelry prompt engineer for Stable Diffusion. 
+User requested: '{user_prompt}'
+RAG Rules to follow: '{rag_context}'
+
+Your task:
+1. Identify the ring's design and color/material from the user's request.
+2. Based on the RAG rules, calculate the EXACT complementary background color.
+3. Output ONLY a comma-separated keywords prompt. It MUST end with 'solid [COLOR] background'.
+NO conversational text, NO quotes. Just the prompt string.
+"""
+    try:
+        resp = llm.invoke([HumanMessage(content=sys_prompt)])
+        enhanced_prompt = resp.content.strip()
+        logger.info(f"Gemma 4 Enhanced Prompt: {enhanced_prompt}")
+    except Exception as e:
+        logger.warning(f"Prompt enhancement failed: {e}. Using original prompt.")
+        enhanced_prompt = user_prompt + ", highly detailed, solid dark background"
+        
     try:
         # 바탕화면 혹은 프로젝트 경로에 있는 JSON 파일을 직접 로드합니다.
         # 실제 경로와 노드 번호("57" 등)는 파일에 맞게 수정해두면 됩니다!
@@ -76,7 +100,7 @@ def generate_base_image(state: AgentState) -> dict:
         workflow_str = json.dumps(workflow)
         
         # 큰따옴표(") 인코딩 이슈를 막기 위해 순수 문자열만 안전하게 추출해서 치환
-        safe_user_prompt = json.dumps(user_prompt)[1:-1]
+        safe_user_prompt = json.dumps(enhanced_prompt)[1:-1]
         
         # ComfyUI에서 프롬프트 칸에 ___USER_PROMPT___ 라고 적어두면 파이썬이 알아서 찾아서 바꿉니다.
         workflow_str = workflow_str.replace("___USER_PROMPT___", safe_user_prompt)

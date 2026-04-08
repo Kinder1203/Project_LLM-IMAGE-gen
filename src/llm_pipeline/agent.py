@@ -7,7 +7,7 @@ from .nodes.router import multimodal_intent_router, intent_router_condition
 from .nodes.rag import retrieve_ring_context
 
 from .nodes.synthesizer import generate_base_image, edit_image, generate_multi_view
-from .nodes.validator import validate_base_image, validate_edited_image, validate_rembg
+from .nodes.validator import validate_base_image, validate_edited_image, validate_rembg, validate_input_image
 
 def check_base_validation(state: AgentState) -> str:
     is_valid = state.get("is_valid", False)
@@ -58,6 +58,20 @@ def route_after_approval(state: AgentState) -> str:
         return "edit_image"
     return "generate_multi_view"
 
+def check_input_image_processing(state: AgentState) -> str:
+    """ 시나리오 2 & 3 에서 업로드된 이미지의 시각적 검증 통과 결과에 따라 분기 """
+    original_intent = state.get("intent", "")
+    is_valid = state.get("is_valid", True)
+    
+    # 누끼에 치명적인 배경색이라면, Gemma가 적어준 배경 변경 프롬프트를 들고 강제로 edit_image로 끌고 감!
+    if not is_valid:
+        return "edit_image"
+        
+    # 정상적인 배경색이라면 원래 유저가 원하던 분기로 알아서 보내줌
+    if original_intent == "partial_modification":
+        return "edit_image"
+    return "generate_multi_view"
+
 def build_ring_generation_graph():
     """ LangGraph 빌드 (조건부 분기 및 Human-in-the-loop 적용) """
     workflow = StateGraph(AgentState)
@@ -68,6 +82,7 @@ def build_ring_generation_graph():
     # 2. 노드 등록
     workflow.add_node("intent_router", multimodal_intent_router)
     workflow.add_node("rag_retriever", retrieve_ring_context)
+    workflow.add_node("validate_input_image", validate_input_image) # 시나리오 2, 3 사전 검열관
     
     workflow.add_node("generate_base_image", generate_base_image)
     workflow.add_node("validate_base_image", validate_base_image)
@@ -85,12 +100,22 @@ def build_ring_generation_graph():
     # 3. 엣지 연결 (흐름 제어)
     workflow.set_entry_point("intent_router")
     
-    # 라우터 조건부 분기
+    # 라우터 조건부 분기 (시나리오 2와 3은 곧바로 validate_input_image 로 가로챔)
     workflow.add_conditional_edges(
         "intent_router",
         intent_router_condition,
         {
             "rag_retriever": "rag_retriever",
+            "edit_image": "validate_input_image",
+            "generate_multi_view": "validate_input_image"
+        }
+    )
+    
+    # Input Image Guardrail 분기 (검증 후 원래 길로 가거나, 강제 에딧으로 가거나)
+    workflow.add_conditional_edges(
+        "validate_input_image",
+        check_input_image_processing,
+        {
             "edit_image": "edit_image",
             "generate_multi_view": "generate_multi_view"
         }

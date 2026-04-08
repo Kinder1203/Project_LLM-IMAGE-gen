@@ -10,7 +10,7 @@ class Settings(BaseSettings):
     WEBHOOK_URL: str = os.getenv("WEBHOOK_URL", "https://graduation-work-backend.onrender.com/api/model-result")
     
     # ComfyUI Endpoint
-    COMFYUI_URL: str = os.getenv("COMFYUI_URL", "http://127.0.0.1:8188")
+    COMFYUI_URL: str = os.getenv("COMFYUI_URL", "https://cloud.comfy.org/")
     
     # TRELLIS Prompt Additions
     TRELLIS_REQUIRED_PROMPT: str = ", solid white background, high resolution, isolated on white, studio lighting, orthographic view, highly detailed"

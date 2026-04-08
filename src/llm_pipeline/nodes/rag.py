@@ -61,5 +61,5 @@ def retrieve_ring_context(state: AgentState) -> dict:
     rag_engine = RingVectorRAG()
     real_context = rag_engine.search_ring_rules(prompt)
     
-    logger.success(f"Retrieved 3D Control Rules Length: {len(real_context)}")
+    logger.info(f"Retrieved 3D Control Rules Length: {len(real_context)}")
     return {"rag_context": real_context}

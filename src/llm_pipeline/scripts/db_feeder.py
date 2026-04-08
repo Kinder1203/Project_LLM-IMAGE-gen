@@ -33,8 +33,8 @@ GEMMA_PROMPT_GUIDES = [
     },
     {
         "category": "Gemma_Multi_Angle_Prompting",
-        "title": "Distance and Background",
-        "content": "Always append 'macro shot, highly detailed jewelry photography, solid white background' for consistency."
+        "title": "Background Contrast for Birefnet Rembg",
+        "content": "CRITICAL RULE: To ensure flawless background removal (Rembg/alpha matting), the background color must ALWAYS be the exact complementary color (보색) that highly contrasts with the jewelry's main material color. For example, use dark/black for white metals, and very bright or cool blue backgrounds for yellow/rose gold."
     }
 ]
 
