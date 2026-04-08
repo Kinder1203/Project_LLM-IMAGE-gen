@@ -18,9 +18,14 @@ def _build_initial_state(request: PipelineRequest) -> dict:
         "user_prompt": request.prompt or "",
         "input_type": request.input_type,
         "base_ring_image_url": request.image_url or "",
+        "base_ring_image_ref": request.image_url or "",
         "retry_count": 0,
         "intent": "",
         "customization_prompt": customization_prompt,
+        "customization_context": "",
+        "customization_kind": "",
+        "expected_engraving_text": "",
+        "edited_ring_image_ref": "",
         "status_message": "",
     }
 

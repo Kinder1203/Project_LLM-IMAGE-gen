@@ -61,6 +61,7 @@
 
 - 텍스트 placeholder 는 문자열 치환으로 주입
 - 입력 이미지는 `LoadImage.inputs.image` 를 교체
+- 중간 생성 결과가 output URL 이면, 다음 workflow 입력 전에 ComfyUI input 파일로 다시 업로드해 chainable reference 를 만듦
 - edit workflow 는 `LoadImage` 가 정확히 1개여야 함
 - multi-view workflow 는 `_meta.title == "Load Character Image"` 인 `LoadImage` 를 우선 사용
 - 후보가 애매하면 조용히 진행하지 않고 즉시 실패
@@ -69,6 +70,7 @@
 
 - ComfyUI `/prompt` 또는 `/history` 오류는 `generation_result=system_error` 로 즉시 실패
 - ComfyUI `/history` polling 은 `COMFYUI_HISTORY_TIMEOUT_SECONDS` 안에 완료되지 않으면 timeout 실패
+- `validate_rembg` 는 전체 다각도를 전부 검사하지 않고 `MULTI_VIEW_VALIDATION_SAMPLE_COUNT` 개의 대표 샘플만 검사
 - Vision 검수 오류도 기본은 실패
 - `ALLOW_VALIDATION_BYPASS=true` 일 때만 개발용 우회 허용
 - 최종 성공은 `is_valid=True` 이고 결과 이미지가 1장 이상 있을 때만 인정

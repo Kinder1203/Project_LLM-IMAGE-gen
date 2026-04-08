@@ -50,6 +50,13 @@ class RingVectorRAG:
             logger.error(f"Vector search failed: {e}")
             return "Failure during context retrieval."
 
+
+def retrieve_rules_for_query(query: str, top_k: int = 3) -> str:
+    if not query.strip():
+        return "No specific instructions found. Follow standard jewelry prompting."
+    rag_engine = RingVectorRAG()
+    return rag_engine.search_ring_rules(query, top_k=top_k)
+
 # 노드 래퍼 함수 (State 반영용)
 def retrieve_ring_context(state: AgentState) -> dict:
     """

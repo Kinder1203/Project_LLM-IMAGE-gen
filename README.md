@@ -34,9 +34,11 @@ COMFYUI_HISTORY_TIMEOUT_SECONDS=300
 VECTOR_DB_PATH=./data/chroma_db
 WEBHOOK_URL=https://graduation-work-backend.onrender.com/api/model-result
 ALLOW_VALIDATION_BYPASS=false
+MULTI_VIEW_VALIDATION_SAMPLE_COUNT=2
 ```
 
 `ALLOW_VALIDATION_BYPASS=true` 를 주면 Vision 검수 오류를 개발용으로만 우회할 수 있습니다. 기본값은 `false` 입니다.
+`MULTI_VIEW_VALIDATION_SAMPLE_COUNT` 는 다각도 결과 중 대표 샘플 몇 장만 Vision 검수할지 정합니다.
 
 ## 백엔드 연동
 - 파이프라인 본체는 최종 `success` 응답 시 `WEBHOOK_URL` 로 결과를 POST 하도록 구현되어 있습니다.
@@ -50,7 +52,7 @@ ALLOW_VALIDATION_BYPASS=false
 - `image_qwen_image_edit_2509.json`
 - `templates-1_click_multiple_character_angles-v1.0 (3).json`
 
-이 파일들은 ComfyUI API format JSON 으로 취급합니다. 저장소에서는 JSON 자체를 수정하지 않고, Python 런타임이 파일을 읽은 뒤 메모리상에서 prompt 값과 `LoadImage.inputs.image` 만 동적으로 주입해서 ComfyUI 로 전송합니다.
+이 파일들은 ComfyUI API format JSON 으로 취급합니다. 저장소에서는 JSON 자체를 수정하지 않고, Python 런타임이 파일을 읽은 뒤 메모리상에서 prompt 값과 `LoadImage.inputs.image` 만 동적으로 주입해서 ComfyUI 로 전송합니다. 중간 생성 결과가 output URL 로 생기면, 다음 edit/multi-view 단계에 넘기기 전에 다시 ComfyUI input 파일로 브리지합니다.
 
 ## 실행 준비
 1. Ollama 에 `gemma4:26b` 를 준비합니다.

@@ -77,8 +77,13 @@ class AgentState(TypedDict):
     synthesized_prompt: str
 
     base_ring_image_url: str
+    base_ring_image_ref: str
     customization_prompt: str
+    customization_context: str
+    customization_kind: str
+    expected_engraving_text: str
     edited_ring_image_url: str
+    edited_ring_image_ref: str
 
     validation_reason: str
     guardrail_result: str

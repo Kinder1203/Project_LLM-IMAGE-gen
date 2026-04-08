@@ -305,6 +305,51 @@ class PipelineRuntimeTests(unittest.TestCase):
         self.assertEqual(response.status, "failed")
         self.assertEqual(response.message, "empty outputs")
 
+    def test_synthesizer_bridges_output_view_url_into_input_filename(self):
+        synthesizer = importlib.import_module("src.llm_pipeline.nodes.synthesizer")
+
+        seen = {}
+
+        class FakeGetResponse:
+            content = b"fake-image"
+
+            def raise_for_status(self):
+                return None
+
+        class FakePostResponse:
+            def raise_for_status(self):
+                return None
+
+            def json(self):
+                return {"name": "bridged_input.png"}
+
+        original_get = synthesizer.requests.get
+        original_post = synthesizer.requests.post
+
+        try:
+            def fake_get(url, timeout=20):
+                seen["download_url"] = url
+                return FakeGetResponse()
+
+            def fake_post(url, files=None, timeout=20):
+                seen["upload_url"] = url
+                seen["upload_name"] = files["image"][0]
+                return FakePostResponse()
+
+            synthesizer.requests.get = fake_get
+            synthesizer.requests.post = fake_post
+
+            bridged = synthesizer._normalize_comfy_image_reference(
+                "https://example-comfy/view?filename=ComfyUI_00003_.png&subfolder=&type=output"
+            )
+        finally:
+            synthesizer.requests.get = original_get
+            synthesizer.requests.post = original_post
+
+        self.assertEqual(bridged, "bridged_input.png")
+        self.assertIn("/upload/image", seen["upload_url"])
+        self.assertEqual(seen["upload_name"], "ComfyUI_00003_.png")
+
 
 @unittest.skipUnless(HAS_DB_DEPS, "db feeder dependencies are required for feeder tests")
 class DbFeederContractTests(unittest.TestCase):

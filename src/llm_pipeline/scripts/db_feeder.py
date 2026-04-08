@@ -185,6 +185,37 @@ CURATED_RULES = [
         ),
     },
     {
+        "id": "prompt_background_extreme_clarity",
+        "category": "Gemma_Prompting",
+        "title": "Background Must Be Extremely Explicit",
+        "tags": ["prompt", "background", "contrast"],
+        "content": (
+            "When prompting a ring for downstream rembg, do not merely say 'black background'. "
+            "Specify a perfectly flat pure solid background with no gradient, no texture, no props, "
+            "no reflections, and very strong silhouette separation from the band."
+        ),
+    },
+    {
+        "id": "engraving_exact_text_only",
+        "category": "Ring_Customization",
+        "title": "Engrave Only the Requested Literal Text",
+        "tags": ["engraving", "literal-text", "edit"],
+        "content": (
+            "For engraving edits, only the literal requested inscription should appear on the ring. "
+            "Do not engrave helper words such as 'engrave this', 'put text', '라고', or other request phrasing."
+        ),
+    },
+    {
+        "id": "engraving_must_be_integrated",
+        "category": "Ring_Customization",
+        "title": "Engraving Must Be Physically Integrated",
+        "tags": ["engraving", "surface", "integration"],
+        "content": (
+            "Engraving should look carved, debossed, or embossed into the ring surface, following the band curvature "
+            "and inheriting the same material highlights and shadows. Reject text that looks like a sticker, overlay, paint, or floating decal."
+        ),
+    },
+    {
         "id": "multiview_front_angle",
         "category": "Gemma_Multi_Angle_Prompting",
         "title": "Front View Definition",

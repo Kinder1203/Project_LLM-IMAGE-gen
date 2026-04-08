@@ -23,6 +23,25 @@ _BACKGROUND_CONTRAST_POLICY = (
 )
 
 
+def _select_validation_urls(urls: list[str], limit: int) -> list[str]:
+    if limit <= 0 or len(urls) <= limit:
+        return urls
+    if limit == 1:
+        return [urls[0]]
+
+    sampled = [urls[0], urls[-1]]
+    if limit > 2:
+        middle_indexes = [round(i * (len(urls) - 1) / (limit - 1)) for i in range(1, limit - 1)]
+        for idx in middle_indexes:
+            sampled.append(urls[idx])
+
+    deduped: list[str] = []
+    for url in sampled:
+        if url not in deduped:
+            deduped.append(url)
+    return deduped[:limit]
+
+
 def _truncate_for_log(text: str, max_len: int = 400) -> str:
     compact = " ".join((text or "").split())
     if len(compact) <= max_len:
@@ -157,6 +176,9 @@ def validate_edited_image(state: AgentState) -> dict:
     """사용자가 지시한 커스텀(각인/보석)이 제대로 합성되었는지 판별"""
     target_img = state.get("edited_ring_image_url", "")
     custom_prompt = state.get("customization_prompt") or state.get("user_prompt", "")
+    customization_context = state.get("customization_context", "")
+    customization_kind = state.get("customization_kind", "")
+    expected_engraving_text = state.get("expected_engraving_text", "")
     retry_count = state.get("retry_count", 0)
     generation_result = state.get("generation_result", "")
 
@@ -170,12 +192,27 @@ def validate_edited_image(state: AgentState) -> dict:
             "status_message": reason,
         }
 
-    sys_prompt = (
-        "Does the image accurately apply the requested modifications: "
-        f"'{custom_prompt}'? Check engravings when text is requested, gems when stones are "
-        "requested, and background corrections when background changes are requested. "
-        "Return JSON {'is_valid': true/false, 'reason': '...'}."
-    )
+    if customization_kind == "engraving" and expected_engraving_text:
+        sys_prompt = (
+            "You are a strict jewelry engraving judge. "
+            f"The ring must contain only the exact engraving text '{expected_engraving_text}'. "
+            "Fail the image if any extra letters, request words, filler text, or malformed text appear. "
+            "Fail the image if the text looks printed, floating, pasted, or drawn on top instead of carved into the metal. "
+            "The engraving must follow the ring curvature, inherit material highlights and shadows, "
+            "and look physically integrated into the band. "
+            f"User request: '{custom_prompt}'. "
+            f"Edit guidance used: '{customization_context}'. "
+            "Return JSON {'is_valid': true/false, 'reason': '...'}."
+        )
+    else:
+        sys_prompt = (
+            "You are a strict jewelry edit judge. "
+            f"User request: '{custom_prompt}'. "
+            f"Edit guidance used: '{customization_context}'. "
+            "Confirm that the requested modification is applied cleanly and looks physically integrated into the ring. "
+            "Fail the image if the new detail looks pasted on, floating, or visually disconnected from the ring surface. "
+            "Return JSON {'is_valid': true/false, 'reason': '...'}."
+        )
 
     logger.info(f"Validating custom edit application (Retry: {retry_count})...")
     result = _call_vision_judge(target_img, sys_prompt)
@@ -230,7 +267,10 @@ def validate_rembg(state: AgentState) -> dict:
     is_valid = True
     reason = "All multi-views passed rembg validation."
 
-    for url in urls:
+    sampled_urls = _select_validation_urls(urls, max(int(config.MULTI_VIEW_VALIDATION_SAMPLE_COUNT), 1))
+    logger.info(f"Sampling {len(sampled_urls)} multi-view images for rembg validation out of {len(urls)} total.")
+
+    for url in sampled_urls:
         res = _call_vision_judge(url, sys_prompt)
         if not res.get("is_valid", False):
             is_valid = False

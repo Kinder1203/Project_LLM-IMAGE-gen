@@ -27,6 +27,7 @@ class Settings(BaseSettings):
 
     # Validation policy
     ALLOW_VALIDATION_BYPASS: bool = False
+    MULTI_VIEW_VALIDATION_SAMPLE_COUNT: int = 2
 
 
 config = Settings()
