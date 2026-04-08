@@ -68,6 +68,7 @@
 ## Failure Policy
 
 - ComfyUI `/prompt` 또는 `/history` 오류는 `generation_result=system_error` 로 즉시 실패
+- ComfyUI `/history` polling 은 `COMFYUI_HISTORY_TIMEOUT_SECONDS` 안에 완료되지 않으면 timeout 실패
 - Vision 검수 오류도 기본은 실패
 - `ALLOW_VALIDATION_BYPASS=true` 일 때만 개발용 우회 허용
 - 최종 성공은 `is_valid=True` 이고 결과 이미지가 1장 이상 있을 때만 인정

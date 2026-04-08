@@ -30,6 +30,7 @@ pip install -r requirements.txt
 OLLAMA_MODEL=gemma4:26b
 OLLAMA_BASE_URL=http://localhost:11434
 COMFYUI_URL=http://127.0.0.1:8188
+COMFYUI_HISTORY_TIMEOUT_SECONDS=300
 VECTOR_DB_PATH=./data/chroma_db
 WEBHOOK_URL=https://graduation-work-backend.onrender.com/api/model-result
 ALLOW_VALIDATION_BYPASS=false
@@ -39,6 +40,7 @@ ALLOW_VALIDATION_BYPASS=false
 
 ## 백엔드 연동
 - 파이프라인 본체는 최종 `success` 응답 시 `WEBHOOK_URL` 로 결과를 POST 하도록 구현되어 있습니다.
+- 현재 웹훅 payload 는 `status`, `thread_id`, `images`, `prompt_used` 를 포함합니다.
 - 기본 설정은 `https://graduation-work-backend.onrender.com/api/model-result` 입니다.
 - 데모용 `test_run.py` 는 로컬 확인 전용이라 실행 시작 시 `config.WEBHOOK_URL = "NONE"` 으로 바꿔서 전송을 막습니다.
 - 실제 백엔드 연동 테스트를 하려면 `test_run.py` 를 쓰지 말고, 앱 서버나 별도 호출 코드에서 `process_generation_request()` 를 사용하거나 `test_run.py` 의 해당 줄을 비활성화해야 합니다.

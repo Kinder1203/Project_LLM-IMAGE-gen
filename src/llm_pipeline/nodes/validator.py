@@ -23,6 +23,13 @@ _BACKGROUND_CONTRAST_POLICY = (
 )
 
 
+def _truncate_for_log(text: str, max_len: int = 400) -> str:
+    compact = " ".join((text or "").split())
+    if len(compact) <= max_len:
+        return compact
+    return f"{compact[:max_len]}..."
+
+
 def _validation_result(is_valid: bool, reason: str, result_type: str = "judged") -> dict:
     return {"is_valid": is_valid, "reason": reason, "result_type": result_type}
 
@@ -79,8 +86,11 @@ def _call_vision_judge(image_url: str, prompt: str) -> dict:
                 item.get("text", "") if isinstance(item, dict) else str(item) for item in raw_content
             )
 
+        logger.info(f"Vision raw response: {_truncate_for_log(str(raw_content))}")
         parsed = json.loads(str(raw_content).strip())
-        return _validation_result(bool(parsed.get("is_valid", False)), parsed.get("reason", "검수 이유 없음"))
+        result = _validation_result(bool(parsed.get("is_valid", False)), parsed.get("reason", "검수 이유 없음"))
+        logger.info(f"Vision parsed result: {result}")
+        return result
     except Exception as exc:
         logger.warning(f"Gemma 4 Vision validation failed: {exc}")
         return _handle_validation_error(f"Vision LLM 검수에 실패했습니다. ({exc})")
@@ -134,6 +144,7 @@ def validate_base_image(state: AgentState) -> dict:
 
     is_valid = result.get("is_valid", False)
     reason = result.get("reason", "")
+    logger.info(f"Base validation outcome: is_valid={is_valid}, reason={_truncate_for_log(reason)}")
     return {
         "is_valid": is_valid,
         "validation_reason": reason,
@@ -171,6 +182,7 @@ def validate_edited_image(state: AgentState) -> dict:
 
     is_valid = result.get("is_valid", False)
     reason = result.get("reason", "")
+    logger.info(f"Edit validation outcome: is_valid={is_valid}, reason={_truncate_for_log(reason)}")
     return {
         "is_valid": is_valid,
         "validation_reason": reason,
@@ -225,6 +237,8 @@ def validate_rembg(state: AgentState) -> dict:
             reason = res.get("reason", "Failed on one of the multi-views.")
             break
 
+    logger.info(f"Rembg validation outcome: is_valid={is_valid}, reason={_truncate_for_log(reason)}")
+
     return {
         "is_valid": is_valid,
         "validation_reason": reason,
@@ -253,6 +267,10 @@ def validate_input_image(state: AgentState) -> dict:
     is_valid = result.get("is_valid", False)
     reason = result.get("reason", "Good contrast.")
     result_type = result.get("result_type", "judged")
+    logger.info(
+        "Input image guardrail outcome: "
+        f"result_type={result_type}, is_valid={is_valid}, reason={_truncate_for_log(reason)}"
+    )
 
     if result_type == "system_error":
         return {

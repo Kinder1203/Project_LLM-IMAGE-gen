@@ -13,6 +13,7 @@ class Settings(BaseSettings):
 
     # Local ComfyUI Endpoint
     COMFYUI_URL: str = "http://127.0.0.1:8188"
+    COMFYUI_HISTORY_TIMEOUT_SECONDS: int = 300
 
     # TRELLIS-style prompt additions kept neutral to avoid conflicting with
     # the complementary-background rule used before rembg.

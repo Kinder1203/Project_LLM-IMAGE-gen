@@ -1,6 +1,7 @@
 import os
 import sys
 import logging
+from urllib.parse import parse_qs, unquote, urlparse
 from uuid import uuid4
 import requests
 from loguru import logger as loguru_logger
@@ -44,7 +45,10 @@ def download_image(url: str, save_dir: str, prefix: str="output"):
     try:
         res = requests.get(url, timeout=10)
         res.raise_for_status()
-        original_filename = url.split("filename=")[-1]
+        parsed = urlparse(url)
+        query = parse_qs(parsed.query)
+        original_filename = query.get("filename", ["output.png"])[0]
+        original_filename = unquote(original_filename)
         filepath = os.path.join(save_dir, f"{prefix}_{original_filename}")
         
         with open(filepath, "wb") as f:

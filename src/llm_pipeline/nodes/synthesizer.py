@@ -65,8 +65,19 @@ def _sync_call_comfyui(payload: dict) -> dict:
             return _comfy_result(error_message=error_message)
 
         logger.info(f"Sent workflow to ComfyUI. Waiting for generation... (Prompt ID: {prompt_id})")
+        started_at = time.monotonic()
+        timeout_seconds = max(int(config.COMFYUI_HISTORY_TIMEOUT_SECONDS), 1)
 
         while True:
+            elapsed = time.monotonic() - started_at
+            if elapsed > timeout_seconds:
+                error_message = (
+                    f"ComfyUI history polling timed out after {timeout_seconds}s "
+                    f"while waiting for prompt_id={prompt_id}."
+                )
+                logger.error(error_message)
+                return _comfy_result(error_message=error_message)
+
             hist_res = requests.get(f"{COMFY_URL}/history/{prompt_id}", timeout=10)
             hist_res.raise_for_status()
             hist_data = hist_res.json()

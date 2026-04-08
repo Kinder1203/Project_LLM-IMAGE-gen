@@ -49,10 +49,12 @@ def process_generation_request(request: PipelineRequest) -> PipelineResponse:
 
     try:
         if request.action == "start":
+            logger.info("Invoking LangGraph with start payload.")
             app_graph.invoke(_build_initial_state(request), config=thread_config)
 
         elif request.action == "accept_base":
             app_graph.update_state(thread_config, {"intent": "approved_base_only"})
+            logger.info("Resuming LangGraph after accept_base.")
             app_graph.invoke(None, config=thread_config)
 
         elif request.action == "request_customization":
@@ -65,11 +67,20 @@ def process_generation_request(request: PipelineRequest) -> PipelineResponse:
                     "status_message": "",
                 },
             )
+            logger.info("Resuming LangGraph after request_customization.")
             app_graph.invoke(None, config=thread_config)
 
+        logger.info("LangGraph invoke returned. Fetching current state...")
         current_state_obj = app_graph.get_state(thread_config)
         final_state = current_state_obj.values
         next_nodes = current_state_obj.next
+        logger.info(
+            "LangGraph state snapshot: "
+            f"next_nodes={next_nodes}, "
+            f"is_valid={final_state.get('is_valid')}, "
+            f"generation_result={final_state.get('generation_result')}, "
+            f"status_message={final_state.get('status_message', '')}"
+        )
 
         if next_nodes:
             logger.info(f"Pipeline paused. Waiting for human. Next nodes: {next_nodes}")
@@ -99,6 +110,7 @@ def process_generation_request(request: PipelineRequest) -> PipelineResponse:
                 try:
                     payload = {
                         "status": "success",
+                        "thread_id": request.thread_id,
                         "images": output_urls,
                         "prompt_used": final_state.get("synthesized_prompt", ""),
                     }
