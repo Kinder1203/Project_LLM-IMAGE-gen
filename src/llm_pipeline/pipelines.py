@@ -52,12 +52,21 @@ def process_generation_request(request: PipelineRequest) -> PipelineResponse:
         # 만약 다음 노드가 잡혀있다면 == interrupt 발생 (사용자 대기)
         if next_nodes:
             logger.info(f"Pipeline paused. Waiting for human. Next nodes: {next_nodes}")
-            return PipelineResponse(
-                status="waiting_for_user",
-                optimized_image_urls=[],
-                base_image_url=final_state.get("base_ring_image_url", ""),
-                message="기본 반지가 준비되었습니다. 승인하시겠습니까, 아니면 커스텀(각인/보석)을 진행하시겠습니까?"
-            )
+            
+            if "wait_for_edit_approval" in next_nodes:
+                return PipelineResponse(
+                    status="waiting_for_user_edit",
+                    optimized_image_urls=[],
+                    base_image_url=final_state.get("edited_ring_image_url", ""),
+                    message="요청하신 커스텀 디자인이 적용되었습니다. 확정하시겠습니까, 아니면 다시 수정하시겠습니까?"
+                )
+            else:
+                return PipelineResponse(
+                    status="waiting_for_user",
+                    optimized_image_urls=[],
+                    base_image_url=final_state.get("base_ring_image_url", ""),
+                    message="기본 반지가 준비되었습니다. 승인하시겠습니까, 아니면 커스텀(각인/보석)을 진행하시겠습니까?"
+                )
             
         # 끝났다면
         is_valid = final_state.get("is_valid", False)
@@ -66,17 +75,18 @@ def process_generation_request(request: PipelineRequest) -> PipelineResponse:
             output_urls = final_state.get("final_output_urls", [])
             log_msg = f"렌더링 최적화 성공! (이미지 수: {len(output_urls)}장)"
             
-            # 메인 서버 Webhook 전송 (하드코딩 주석 해제)
-            try:
-                payload = {
-                    "status": "success",
-                    "images": output_urls,
-                    "prompt_used": final_state.get("synthesized_prompt", "")
-                }
-                logger.info(f"Sending Webhook to backend: {config.WEBHOOK_URL}")
-                requests.post(config.WEBHOOK_URL, json=payload, timeout=10)
-            except Exception as e:
-                logger.error(f"Webhook 발송 실패: {e}")
+            # 메인 서버 Webhook 전송 (백엔드 연동 전이므로 안전하게 예외처리 및 패스)
+            if config.WEBHOOK_URL and config.WEBHOOK_URL != "NONE":
+                try:
+                    payload = {
+                        "status": "success",
+                        "images": output_urls,
+                        "prompt_used": final_state.get("synthesized_prompt", "")
+                    }
+                    logger.info(f"Sending Webhook to backend: {config.WEBHOOK_URL} (아직 백엔드가 꺼져있다면 에러 무시됨)")
+                    requests.post(config.WEBHOOK_URL, json=payload, timeout=5)
+                except Exception as e:
+                    logger.warning(f"Webhook 발송 무시됨 (정상): 백엔드 서버에 아직 연결되지 않았습니다. ({e})")
                 
             return PipelineResponse(
                 status="success",

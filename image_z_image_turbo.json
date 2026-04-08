@@ -1,33 +1,15 @@
 {
-  "63": {
+  "264": {
     "inputs": {
-      "model": "BiRefNet-HR-matting",
-      "mask_blur": 0,
-      "mask_offset": 0,
-      "invert_output": false,
-      "refine_foreground": true,
-      "background": "Alpha",
-      "background_color": "#222222",
-      "image": [
+      "filename_prefix": "ComfyUI",
+      "images": [
         "57:8",
         0
       ]
     },
-    "class_type": "BiRefNetRMBG",
+    "class_type": "SaveImage",
     "_meta": {
-      "title": "BiRefNet (RMBG)"
-    }
-  },
-  "263": {
-    "inputs": {
-      "images": [
-        "63",
-        0
-      ]
-    },
-    "class_type": "PreviewImage",
-    "_meta": {
-      "title": "이미지 미리보기"
+      "title": "이미지 저장"
     }
   },
   "57:30": {

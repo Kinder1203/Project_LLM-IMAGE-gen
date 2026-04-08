@@ -26,7 +26,7 @@ def check_edit_validation(state: AgentState) -> str:
     retries = state.get("retry_count", 0)
     
     if is_valid:
-        return "generate_multi_view"
+        return "wait_for_edit_approval"
     
     if retries >= 3:
         return "end"
@@ -44,10 +44,11 @@ def check_rembg_validation(state: AgentState) -> str:
     return "generate_multi_view"
 
 def wait_for_user_approval(state: AgentState) -> dict:
-    """ 
-    사용자 승인을 받기 위한 정지(Interrupt) 지점을 형성하는 빈 노드. 
-    로직 상 generate_multi_view로 강제로 넘어가는 이전 설계의 치명적 결함을 방지합니다. 
-    """
+    """ 사용자 승인을 받기 위한 정지(Interrupt) 지점을 형성하는 1차 빈 노드 """
+    return {}
+
+def wait_for_edit_approval(state: AgentState) -> dict:
+    """ 편집된 시안에 대해 사용자 승인을 받기 위한 정지(Interrupt) 지점 2차 빈 노드 """
     return {}
 
 def route_after_approval(state: AgentState) -> str:
@@ -75,6 +76,8 @@ def build_ring_generation_graph():
     
     workflow.add_node("edit_image", edit_image)
     workflow.add_node("validate_edited_image", validate_edited_image)
+    
+    workflow.add_node("wait_for_edit_approval", wait_for_edit_approval) # 2차 커스텀 확인 휴게소
     
     workflow.add_node("generate_multi_view", generate_multi_view)
     workflow.add_node("validate_rembg", validate_rembg)
@@ -122,9 +125,19 @@ def build_ring_generation_graph():
         "validate_edited_image",
         check_edit_validation,
         {
-            "generate_multi_view": "generate_multi_view",
+            "wait_for_edit_approval": "wait_for_edit_approval",
             "edit_image": "edit_image",
             "end": END
+        }
+    )
+    
+    # 2차 승인 후 루트
+    workflow.add_conditional_edges(
+        "wait_for_edit_approval",
+        route_after_approval,
+        {
+            "edit_image": "edit_image",
+            "generate_multi_view": "generate_multi_view"
         }
     )
     
@@ -140,10 +153,10 @@ def build_ring_generation_graph():
     )
     
     # 4. 컴파일 (사용자 피드백을 받기 전 일시정지할 지점 선언)
-    # validate_* 노드가 끝나고 사용자가 대답할 휴게소(wait_for_user_approval) 진입 전에 파이프라인 정지.
+    # 1차 বে이스 완성 후(wait_for_user_approval), 그리고 수정본 완성 후(wait_for_edit_approval) 2번 정지합니다.
     app = workflow.compile(
         checkpointer=checkpointer,
-        interrupt_before=["wait_for_user_approval"]
+        interrupt_before=["wait_for_user_approval", "wait_for_edit_approval"]
     )
     
     return app

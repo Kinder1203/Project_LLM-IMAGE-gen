@@ -4,10 +4,10 @@
 ## Architecture Highlights
 본 아키텍처는 **LangGraph의 상태 머신 (StateGraph)** 과 **MemorySaver Checkpointer** 를 활용한 Human-in-the-loop 패턴을 기반으로 설계되었습니다. 단순 스크립트 기반 연결이 아닌, 조건과 상황(사용자 승인, 재시도 루프)에 유연하게 대처할 수 있는 견고한 백엔드 구조입니다.
 
-### 1. Human-in-the-loop (인간 개입 대기)
-LangGraph에서 특정 노드에 진입하기 직전에 파이프라인을 의도적으로 일시 정지(Interrupt)시킵니다.
-* **1단계 완료 시점**: 배경이 있는 단일 앞면 반지 이미지를 생성한 직후 파이프라인은 멈춥니다. 결과를 프론트엔드로 보내 사용자가 수락(Accept)할지, 수정(Customization)할지 선택하기를 기다립니다.
-* **선택 시 Resume**: 선택 결과가 API로 들어오면, 멈췄던 StateGraph가 깨어나 선택된 노드(`edit_image` 또는 `generate_multi_view`)로 진입합니다.
+### 1. Double Human-in-the-loop (이중 인간 개입 대기)
+LangGraph에서 특정 노드 완료 시점에 파이프라인을 의도적으로 일시 정지(Interrupt)시킵니다.
+* **1차 휴게소 (베이스 생성 후)**: 프롬프트에서 초기 시안이 나왔을 때 멈춥니다. 사용자가 수락(다각도로 직행)할지, 수정(커스텀)할지 묻습니다.
+* **2차 휴게소 (수정본 생성 후)**: 사용자의 의도대로 각인/보석이 잘 삽입되었는지 수정한 뒤 **또 다시 멈춥니다**. 유저가 만족하면 수락(다각도로 직행)하고, 불만족이면 재커스텀을 지시합니다.
 
 ### 2. Gemma 4 통합 자가 검열 루프 (Self-correction)
 LangGraph의 Conditional Edge를 이용하여 **최대 3회**의 자가 복구 로직을 구현했습니다.

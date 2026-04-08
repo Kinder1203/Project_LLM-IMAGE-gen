@@ -2,6 +2,8 @@ import time
 import json
 import logging
 import requests
+import re
+import random
 from langchain_core.messages import HumanMessage
 from langchain_ollama import ChatOllama
 from ..core.schemas import AgentState
@@ -79,6 +81,10 @@ def generate_base_image(state: AgentState) -> dict:
         # ComfyUI에서 프롬프트 칸에 ___USER_PROMPT___ 라고 적어두면 파이썬이 알아서 찾아서 바꿉니다.
         workflow_str = workflow_str.replace("___USER_PROMPT___", safe_user_prompt)
         
+        # 재시도나 매 생성 시마다 똑같은 이미지가 나오지 않게 하드코딩된 seed 파괴 및 랜덤값 주입
+        workflow_str = re.sub(r'"seed":\s*\d+', f'"seed": {random.randint(1, 2147483647)}', workflow_str)
+        workflow_str = re.sub(r'"noise_seed":\s*\d+', f'"noise_seed": {random.randint(1, 2147483647)}', workflow_str)
+        
         workflow = json.loads(workflow_str)
         
         comfyUI_payload = {
@@ -118,6 +124,10 @@ def edit_image(state: AgentState) -> dict:
         # ComfyUI에서 이미지 경로 값에 ___BASE_IMAGE___, 각인 텍스트 값에 ___CUSTOM_PROMPT___ 기입
         workflow_str = workflow_str.replace("___BASE_IMAGE___", base_image)
         workflow_str = workflow_str.replace("___CUSTOM_PROMPT___", safe_custom_prompt)
+        
+        # 재시도 루프 시 동일 결과 방지
+        workflow_str = re.sub(r'"seed":\s*\d+', f'"seed": {random.randint(1, 2147483647)}', workflow_str)
+        workflow_str = re.sub(r'"noise_seed":\s*\d+', f'"noise_seed": {random.randint(1, 2147483647)}', workflow_str)
         
         workflow = json.loads(workflow_str)
         

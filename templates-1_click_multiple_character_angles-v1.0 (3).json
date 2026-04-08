@@ -12,7 +12,7 @@
     "inputs": {
       "filename_prefix": "ComfyUI-close_up",
       "images": [
-        "65:33:19",
+        "139",
         0
       ]
     },
@@ -25,7 +25,7 @@
     "inputs": {
       "filename_prefix": "ComfyUI-wide_shot",
       "images": [
-        "65:35:80",
+        "140",
         0
       ]
     },
@@ -130,58 +130,42 @@
       "title": "Prompt Wide angle"
     }
   },
-  "68": {
+  "139": {
     "inputs": {
-      "value": "Rotate the camera 90 degrees to the right.\n"
+      "model": "BiRefNet-HR-matting",
+      "mask_blur": 0,
+      "mask_offset": 0,
+      "invert_output": true,
+      "refine_foreground": true,
+      "background": "Alpha",
+      "background_color": "#222222",
+      "image": [
+        "65:33:19",
+        0
+      ]
     },
-    "class_type": "PrimitiveStringMultiline",
+    "class_type": "BiRefNetRMBG",
     "_meta": {
-      "title": "Prompt 90deg right"
+      "title": "BiRefNet (RMBG)"
     }
   },
-  "69": {
+  "140": {
     "inputs": {
-      "value": "Rotate the camera 45 degrees to the right.\n"
+      "model": "BiRefNet-HR-matting",
+      "mask_blur": 0,
+      "mask_offset": 0,
+      "invert_output": true,
+      "refine_foreground": true,
+      "background": "Alpha",
+      "background_color": "#222222",
+      "image": [
+        "65:35:80",
+        0
+      ]
     },
-    "class_type": "PrimitiveStringMultiline",
+    "class_type": "BiRefNetRMBG",
     "_meta": {
-      "title": "Prompt 45deg right"
-    }
-  },
-  "70": {
-    "inputs": {
-      "value": "Turn the camera to an aerial view."
-    },
-    "class_type": "PrimitiveStringMultiline",
-    "_meta": {
-      "title": "Prompt Aerial view"
-    }
-  },
-  "71": {
-    "inputs": {
-      "value": "Turn the camera to a low-angle view."
-    },
-    "class_type": "PrimitiveStringMultiline",
-    "_meta": {
-      "title": "Prompt Low angle"
-    }
-  },
-  "72": {
-    "inputs": {
-      "value": "Rotate the camera 90 degrees to the left."
-    },
-    "class_type": "PrimitiveStringMultiline",
-    "_meta": {
-      "title": "Prompt 90deg"
-    }
-  },
-  "73": {
-    "inputs": {
-      "value": "Rotate the camera 45 degrees to the left."
-    },
-    "class_type": "PrimitiveStringMultiline",
-    "_meta": {
-      "title": "Prompt Left 45deg"
+      "title": "BiRefNet (RMBG)"
     }
   },
   "48:9": {
@@ -540,10 +524,7 @@
   },
   "65:37:93": {
     "inputs": {
-      "prompt": [
-        "69",
-        0
-      ],
+      "prompt": "",
       "clip": [
         "48:10",
         0
@@ -700,10 +681,7 @@
   },
   "65:39:102": {
     "inputs": {
-      "prompt": [
-        "68",
-        0
-      ],
+      "prompt": "",
       "clip": [
         "48:10",
         0
@@ -860,10 +838,7 @@
   },
   "65:42:120": {
     "inputs": {
-      "prompt": [
-        "70",
-        0
-      ],
+      "prompt": "",
       "clip": [
         "48:10",
         0
@@ -1008,10 +983,7 @@
   },
   "65:44:128": {
     "inputs": {
-      "prompt": [
-        "71",
-        0
-      ],
+      "prompt": "",
       "clip": [
         "48:10",
         0
@@ -1150,10 +1122,7 @@
   },
   "65:46:137": {
     "inputs": {
-      "prompt": [
-        "73",
-        0
-      ],
+      "prompt": "",
       "clip": [
         "48:10",
         0
@@ -1340,10 +1309,7 @@
   },
   "65:40:111": {
     "inputs": {
-      "prompt": [
-        "72",
-        0
-      ],
+      "prompt": "",
       "clip": [
         "48:10",
         0
