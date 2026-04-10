@@ -9,9 +9,6 @@ from src.llm_pipeline.pipelines import process_generation_request
 from src.llm_pipeline.core.schemas import PipelineRequest
 from src.llm_pipeline.core.config import config
 
-# 개발/테스트를 위해 백엔드 웹훅 강제로 꺼버림 (서버로 절대로 안 쏨!)
-config.WEBHOOK_URL = "NONE"
-
 
 def configure_demo_logging():
     logging.basicConfig(
@@ -74,6 +71,8 @@ def get_input_image_path() -> str:
 
 def run_interactive_demo():
     configure_demo_logging()
+    # 데모 실행 중에는 외부 백엔드로 웹훅을 보내지 않는다.
+    config.WEBHOOK_URL = "NONE"
     os.makedirs("output_images", exist_ok=True)
     os.makedirs("input_images", exist_ok=True)
     

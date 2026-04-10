@@ -1,9 +1,9 @@
 import logging
 import os
 from langchain_chroma import Chroma
-from langchain_ollama import OllamaEmbeddings
 from ..core.schemas import AgentState
 from ..core.config import config
+from ..core.vllm_client import VLLMEmbeddingFunction
 
 logger = logging.getLogger(__name__)
 
@@ -13,10 +13,7 @@ class RingVectorRAG:
     Chroma를 활용하여 사용자 질문에 맞는 Gemma 통제 가이드 및 반지 전문 지식을 찾아옴.
     """
     def __init__(self):
-        self.embeddings = OllamaEmbeddings(
-            model="nomic-embed-text", 
-            base_url=config.OLLAMA_BASE_URL
-        )
+        self.embeddings = VLLMEmbeddingFunction(model=config.VLLM_EMBED_MODEL)
         
         # db_feeder.py가 먼저 실행되었다는 가정 하에 로드
         if os.path.exists(config.VECTOR_DB_PATH):

@@ -4,11 +4,10 @@ import logging
 from urllib.parse import quote
 
 import requests
-from langchain_core.messages import HumanMessage
-from langchain_ollama import ChatOllama
 
 from ..core.config import config
 from ..core.schemas import AgentState
+from ..core.vllm_client import invoke_multimodal_json
 
 logger = logging.getLogger(__name__)
 
@@ -85,25 +84,12 @@ def _call_vision_judge(image_url: str, prompt: str) -> dict:
     if not img_base64:
         return _handle_validation_error("검수용 이미지를 다운로드하지 못했습니다.")
 
-    llm = ChatOllama(
-        model=config.OLLAMA_MODEL,
-        base_url=config.OLLAMA_BASE_URL,
-        temperature=0.0,
-        format="json",
-    )
-
     try:
-        message_content = [
-            {"type": "text", "text": prompt},
-            {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{img_base64}"}},
-        ]
-
-        resp = llm.invoke([HumanMessage(content=message_content)])
-        raw_content = resp.content
-        if isinstance(raw_content, list):
-            raw_content = "".join(
-                item.get("text", "") if isinstance(item, dict) else str(item) for item in raw_content
-            )
+        raw_content = invoke_multimodal_json(
+            prompt=prompt,
+            image_data_url=f"data:image/png;base64,{img_base64}",
+            max_tokens=config.VLLM_VALIDATOR_MAX_TOKENS,
+        )
 
         logger.info(f"Vision raw response: {_truncate_for_log(str(raw_content))}")
         parsed = json.loads(str(raw_content).strip())
@@ -111,8 +97,8 @@ def _call_vision_judge(image_url: str, prompt: str) -> dict:
         logger.info(f"Vision parsed result: {result}")
         return result
     except Exception as exc:
-        logger.warning(f"Gemma 4 Vision validation failed: {exc}")
-        return _handle_validation_error(f"Vision LLM 검수에 실패했습니다. ({exc})")
+        logger.warning(f"vLLM vision validation failed: {exc}")
+        return _handle_validation_error(f"vLLM Vision 검수에 실패했습니다. ({exc})")
 
 
 def _status_message(prefix: str, reason: str, fallback: str) -> str:

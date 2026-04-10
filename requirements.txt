@@ -6,7 +6,7 @@ loguru>=0.7.0
 # Langchain & LangGraph Orchestration
 langchain-core>=0.1.0
 langgraph>=0.0.26
-langchain-ollama>=0.0.1
+openai>=1.30.0
 
 # 3D Pipeline Vector RAG (Lightweight search)
 langchain-chroma>=0.1.0

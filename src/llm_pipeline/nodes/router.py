@@ -1,9 +1,6 @@
 import json
 import logging
-from langchain_ollama import ChatOllama
-from langchain_core.messages import HumanMessage
 from ..core.schemas import AgentState
-from ..core.config import config
 
 logger = logging.getLogger(__name__)
 

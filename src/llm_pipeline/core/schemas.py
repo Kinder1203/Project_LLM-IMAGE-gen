@@ -35,7 +35,7 @@ class PipelineRequest(BaseModel):
     prompt: Optional[str] = Field(None, description="반지 디자인 설명 본문")
     image_url: Optional[str] = Field(None, description="기존 반지 시안 또는 ComfyUI 업로드 이미지명")
 
-    thread_id: str = Field("default_thread", description="LangGraph 세션 스레드 ID")
+    thread_id: str = Field(..., description="LangGraph 세션 스레드 ID. 모든 요청에서 명시해야 합니다.")
     action: Literal["start", "accept_base", "request_customization"] = Field(
         "start",
         description="실행 액션 (처음 시작, 승인, 또는 커스텀 요청)",
@@ -48,6 +48,9 @@ class PipelineRequest(BaseModel):
     @model_validator(mode="after")
     def canonicalize_input_type(self) -> "PipelineRequest":
         self.input_type = normalize_input_type(self.prompt, self.image_url)
+
+        if not _has_content(self.thread_id):
+            raise ValueError("thread_id is required and must not be blank.")
 
         if self.action == "start" and not (_has_content(self.prompt) or _has_content(self.image_url)):
             raise ValueError("start action requires either a prompt, an image_url, or both.")

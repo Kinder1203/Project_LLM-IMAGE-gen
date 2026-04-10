@@ -1,18 +1,20 @@
 import importlib
 import importlib.util
 import json
+import sys
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
 
 HAS_PYDANTIC = importlib.util.find_spec("pydantic") is not None
 HAS_RUNTIME_DEPS = all(
     importlib.util.find_spec(module_name) is not None
-    for module_name in ("pydantic", "langgraph", "langchain_ollama")
+    for module_name in ("pydantic", "langgraph", "openai")
 )
 HAS_DB_DEPS = all(
     importlib.util.find_spec(module_name) is not None
-    for module_name in ("pydantic", "langchain_chroma", "langchain_ollama")
+    for module_name in ("pydantic", "langchain_chroma", "openai")
 )
 
 
@@ -35,7 +37,7 @@ class ExportedTemplateContractTests(unittest.TestCase):
 
     def test_multi_view_template_keeps_exported_load_image_shape(self):
         template = json.loads(
-            Path("templates-1_click_multiple_character_angles-v1.0 (3).json").read_text(encoding="utf-8")
+            Path("templates-1_click_multiple_character_angles-v1.0 (3) (1).json").read_text(encoding="utf-8")
         )
         load_nodes = [node for node in template.values() if node.get("class_type") == "LoadImage"]
         titled_nodes = [node for node in load_nodes if ((node.get("_meta") or {}).get("title") or "") == "Load Character Image"]
@@ -51,15 +53,28 @@ class SchemaContractTests(unittest.TestCase):
     def test_input_type_is_normalized_from_payload_shape(self):
         from src.llm_pipeline.core.schemas import PipelineRequest
 
-        self.assertEqual(PipelineRequest(prompt="ring idea").input_type, "text")
-        self.assertEqual(PipelineRequest(input_type="image", image_url="sample.png").input_type, "image_only")
+        self.assertEqual(PipelineRequest(thread_id="t1", prompt="ring idea").input_type, "text")
+        self.assertEqual(PipelineRequest(thread_id="t2", input_type="image", image_url="sample.png").input_type, "image_only")
         self.assertEqual(
-            PipelineRequest(input_type="modification", prompt="add engraving", image_url="sample.png").input_type,
+            PipelineRequest(
+                thread_id="t3",
+                input_type="modification",
+                prompt="add engraving",
+                image_url="sample.png",
+            ).input_type,
             "image_and_text",
         )
-        self.assertEqual(PipelineRequest(input_type="image_only", image_url="sample.png").input_type, "image_only")
         self.assertEqual(
-            PipelineRequest(input_type="image_and_text", prompt="add gem", image_url="sample.png").input_type,
+            PipelineRequest(thread_id="t4", input_type="image_only", image_url="sample.png").input_type,
+            "image_only",
+        )
+        self.assertEqual(
+            PipelineRequest(
+                thread_id="t5",
+                input_type="image_and_text",
+                prompt="add gem",
+                image_url="sample.png",
+            ).input_type,
             "image_and_text",
         )
 
@@ -79,13 +94,19 @@ class SchemaContractTests(unittest.TestCase):
         from src.llm_pipeline.core.schemas import PipelineRequest
 
         with self.assertRaises(ValueError):
-            PipelineRequest(action="start")
+            PipelineRequest(thread_id="t-start", action="start")
+
+    def test_thread_id_is_required(self):
+        from src.llm_pipeline.core.schemas import PipelineRequest
+
+        with self.assertRaises(ValueError):
+            PipelineRequest(thread_id="", prompt="ring idea")
 
     def test_request_customization_requires_non_empty_prompt(self):
         from src.llm_pipeline.core.schemas import PipelineRequest
 
         with self.assertRaises(ValueError):
-            PipelineRequest(action="request_customization", customization_prompt="")
+            PipelineRequest(thread_id="t-custom", action="request_customization", customization_prompt="")
 
 
 class FakeState:
@@ -110,8 +131,132 @@ class FakeGraph:
         return self._state
 
 
+class FakeChatCompletions:
+    def __init__(self, sink, content):
+        self.sink = sink
+        self.content = content
+
+    def create(self, **kwargs):
+        self.sink.update(kwargs)
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content=self.content))]
+        )
+
+
+class FakeEmbeddingsApi:
+    def __init__(self, sink):
+        self.sink = sink
+
+    def create(self, **kwargs):
+        self.sink.update(kwargs)
+        return SimpleNamespace(
+            data=[SimpleNamespace(embedding=[0.1, 0.2, 0.3]) for _ in kwargs["input"]]
+        )
+
+
+class FakeOpenAIClient:
+    def __init__(self, chat_sink=None, chat_content="", embed_sink=None):
+        self.chat = SimpleNamespace(
+            completions=FakeChatCompletions(chat_sink if chat_sink is not None else {}, chat_content)
+        )
+        self.embeddings = FakeEmbeddingsApi(embed_sink if embed_sink is not None else {})
+
+
 @unittest.skipUnless(HAS_RUNTIME_DEPS, "runtime dependencies are required for pipeline tests")
 class PipelineRuntimeTests(unittest.TestCase):
+    def test_vllm_multimodal_payload_uses_short_token_limit(self):
+        vllm_client = importlib.import_module("src.llm_pipeline.core.vllm_client")
+        config = importlib.import_module("src.llm_pipeline.core.config").config
+
+        seen = {}
+        original_chat_client = vllm_client._chat_client
+
+        try:
+            vllm_client._chat_client = lambda: FakeOpenAIClient(chat_sink=seen, chat_content='{"is_valid": true}')
+            content = vllm_client.invoke_multimodal_json(
+                prompt="judge the image",
+                image_data_url="data:image/png;base64,abc123",
+            )
+        finally:
+            vllm_client._chat_client = original_chat_client
+
+        self.assertEqual(content, '{"is_valid": true}')
+        self.assertEqual(seen["model"], config.VLLM_CHAT_MODEL)
+        self.assertEqual(seen["max_tokens"], config.VLLM_VALIDATOR_MAX_TOKENS)
+        self.assertEqual(seen["temperature"], 0.0)
+        self.assertEqual(seen["messages"][0]["content"][0]["type"], "text")
+        self.assertEqual(seen["messages"][0]["content"][1]["type"], "image_url")
+        self.assertEqual(
+            seen["messages"][0]["content"][1]["image_url"]["url"],
+            "data:image/png;base64,abc123",
+        )
+
+    def test_vllm_text_prompt_uses_prompt_token_limit(self):
+        vllm_client = importlib.import_module("src.llm_pipeline.core.vllm_client")
+        config = importlib.import_module("src.llm_pipeline.core.config").config
+
+        seen = {}
+        original_chat_client = vllm_client._chat_client
+
+        try:
+            vllm_client._chat_client = lambda: FakeOpenAIClient(chat_sink=seen, chat_content="ring, black background")
+            content = vllm_client.invoke_text_prompt("rewrite this prompt")
+        finally:
+            vllm_client._chat_client = original_chat_client
+
+        self.assertEqual(content, "ring, black background")
+        self.assertEqual(seen["model"], config.VLLM_CHAT_MODEL)
+        self.assertEqual(seen["max_tokens"], config.VLLM_PROMPT_MAX_TOKENS)
+        self.assertEqual(seen["messages"][0]["content"], "rewrite this prompt")
+
+    def test_vllm_embedding_function_returns_vectors(self):
+        vllm_client = importlib.import_module("src.llm_pipeline.core.vllm_client")
+
+        seen = {}
+        embedder = vllm_client.VLLMEmbeddingFunction(model="embed-model", base_url="http://embed", api_key="token")
+        original_client = embedder._client
+
+        try:
+            embedder._client = lambda: FakeOpenAIClient(embed_sink=seen)
+            docs = embedder.embed_documents(["a", "b"])
+            query = embedder.embed_query("c")
+        finally:
+            embedder._client = original_client
+
+        self.assertEqual(seen["model"], "embed-model")
+        self.assertEqual(seen["input"], ["c"])
+        self.assertEqual(len(docs), 2)
+        self.assertEqual(query, [0.1, 0.2, 0.3])
+
+    def test_rag_uses_vllm_embedding_function(self):
+        rag = importlib.import_module("src.llm_pipeline.nodes.rag")
+        vllm_client = importlib.import_module("src.llm_pipeline.core.vllm_client")
+
+        seen = {}
+
+        class FakeChroma:
+            def __init__(self, collection_name, embedding_function, persist_directory):
+                seen["collection_name"] = collection_name
+                seen["embedding_function"] = embedding_function
+                seen["persist_directory"] = persist_directory
+
+            def similarity_search(self, query, k=3):
+                return []
+
+        original_chroma = rag.Chroma
+        original_exists = rag.os.path.exists
+
+        try:
+            rag.Chroma = FakeChroma
+            rag.os.path.exists = lambda path: True
+            rag.RingVectorRAG()
+        finally:
+            rag.Chroma = original_chroma
+            rag.os.path.exists = original_exists
+
+        self.assertEqual(seen["collection_name"], "ring_gemma_rules")
+        self.assertIsInstance(seen["embedding_function"], vllm_client.VLLMEmbeddingFunction)
+
     def test_generation_system_error_stops_without_retry(self):
         agent = importlib.import_module("src.llm_pipeline.agent")
 
@@ -204,6 +349,38 @@ class PipelineRuntimeTests(unittest.TestCase):
         self.assertEqual(repaired["guardrail_result"], "repair_required")
         self.assertIn("solid pitch black", repaired["customization_prompt"])
 
+    def test_synthesizer_enforces_strict_background_separation_prompt(self):
+        synthesizer = importlib.import_module("src.llm_pipeline.nodes.synthesizer")
+
+        prompt = synthesizer._enforce_background_contrast(
+            "platinum wedding ring",
+            "platinum wedding ring",
+        )
+
+        self.assertIn("single flat pure pitch-black studio background", prompt)
+        self.assertIn("background color must strongly contrast with the ring material", prompt)
+        self.assertIn("clearly visible empty inner hole", prompt)
+        self.assertIn("single centered ring product photo", prompt)
+
+    def test_edit_prompt_preserves_source_and_localizes_removal(self):
+        synthesizer = importlib.import_module("src.llm_pipeline.nodes.synthesizer")
+
+        prompt = synthesizer._compose_edit_prompt(
+            {
+                "customization_prompt": "remove the center diamond",
+                "synthesized_prompt": "yellow gold solitaire ring, centered crop",
+                "user_prompt": "remove the center diamond",
+            },
+            "Preserve pose and keep edits local.",
+            "gemstone",
+            "",
+        )
+
+        self.assertIn("Use the provided input ring image as the authoritative source.", prompt)
+        self.assertIn("Keep the same ring identity, same composition, same camera angle, same crop", prompt)
+        self.assertIn("Remove only the specifically requested detail", prompt)
+        self.assertIn("Do not add replacement decorations", prompt)
+
     def test_validate_base_image_preserves_generation_system_error_message(self):
         validator = importlib.import_module("src.llm_pipeline.nodes.validator")
 
@@ -267,6 +444,7 @@ class PipelineRuntimeTests(unittest.TestCase):
 
         try:
             request = schemas.PipelineRequest(
+                thread_id="thread-image-and-text",
                 input_type="image_and_text",
                 prompt="inside engraving forever",
                 image_url="uploaded.png",
@@ -297,7 +475,11 @@ class PipelineRuntimeTests(unittest.TestCase):
         pipelines.app_graph = fake_graph
 
         try:
-            request = schemas.PipelineRequest(input_type="text", prompt="slim platinum ring")
+            request = schemas.PipelineRequest(
+                thread_id="thread-success-empty-outputs",
+                input_type="text",
+                prompt="slim platinum ring",
+            )
             response = pipelines.process_generation_request(request)
         finally:
             pipelines.app_graph = original_graph
@@ -353,6 +535,35 @@ class PipelineRuntimeTests(unittest.TestCase):
 
 @unittest.skipUnless(HAS_DB_DEPS, "db feeder dependencies are required for feeder tests")
 class DbFeederContractTests(unittest.TestCase):
+    def test_db_feeder_builds_vector_store_with_vllm_embeddings(self):
+        db_feeder = importlib.import_module("src.llm_pipeline.scripts.db_feeder")
+        vllm_client = importlib.import_module("src.llm_pipeline.core.vllm_client")
+
+        fake_langchain_chroma = SimpleNamespace()
+        seen = {}
+
+        class FakeChroma:
+            def __init__(self, collection_name, embedding_function, persist_directory):
+                seen["collection_name"] = collection_name
+                seen["embedding_function"] = embedding_function
+                seen["persist_directory"] = persist_directory
+
+        fake_langchain_chroma.Chroma = FakeChroma
+        original_module = sys.modules.get("langchain_chroma")
+        sys.modules["langchain_chroma"] = fake_langchain_chroma
+
+        try:
+            db_feeder._build_vector_store("vector-path")
+        finally:
+            if original_module is None:
+                del sys.modules["langchain_chroma"]
+            else:
+                sys.modules["langchain_chroma"] = original_module
+
+        self.assertEqual(seen["collection_name"], "ring_gemma_rules")
+        self.assertEqual(seen["persist_directory"], "vector-path")
+        self.assertIsInstance(seen["embedding_function"], vllm_client.VLLMEmbeddingFunction)
+
     def test_curated_rules_are_rich_and_stable(self):
         db_feeder = importlib.import_module("src.llm_pipeline.scripts.db_feeder")
 
@@ -364,6 +575,9 @@ class DbFeederContractTests(unittest.TestCase):
         self.assertEqual(len(ids), len(set(ids)))
         self.assertIn("Validation_and_Rembg", categories)
         self.assertIn("Ring_Material", categories)
+        self.assertIn("background_subject_isolation_absolute", ids)
+        self.assertIn("edit_preserve_pose_crop_background", ids)
+        self.assertIn("edit_removal_restore_surface", ids)
 
 
 if __name__ == "__main__":

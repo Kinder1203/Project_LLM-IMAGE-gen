@@ -3,9 +3,10 @@ from pathlib import Path
 from loguru import logger
 
 from ..core.config import config
+from ..core.vllm_client import VLLMEmbeddingFunction
 
 COLLECTION_NAME = "ring_gemma_rules"
-EMBEDDING_MODEL = "nomic-embed-text"
+EMBEDDING_MODEL = "BAAI/bge-m3"
 
 CURATED_RULES = [
     {
@@ -97,6 +98,28 @@ CURATED_RULES = [
         ),
     },
     {
+        "id": "background_subject_isolation_absolute",
+        "category": "Validation_and_Rembg",
+        "title": "Ring Must Be the Only Subject",
+        "tags": ["background", "subject-isolation", "prompt"],
+        "content": (
+            "Source renders should contain exactly one centered ring as the only subject. Avoid extra "
+            "jewelry, decorative props, fingers, hands, shadows from other objects, and clutter that "
+            "can merge with the band silhouette or confuse downstream extraction."
+        ),
+    },
+    {
+        "id": "background_contrast_priority_over_style",
+        "category": "Validation_and_Rembg",
+        "title": "Contrast Priority Beats Aesthetic Styling",
+        "tags": ["background", "contrast", "priority"],
+        "content": (
+            "When choosing a backdrop, prioritize hard visual separation between the ring and the "
+            "background over artistic mood. A less stylish but clearly contrasting solid color is "
+            "better than a beautiful background that weakens edge separation."
+        ),
+    },
+    {
         "id": "lighting_product_style",
         "category": "Ring_Design",
         "title": "Lighting for Product Isolation",
@@ -160,6 +183,39 @@ CURATED_RULES = [
             "Edits should preserve material, band thickness, silhouette, and overall composition "
             "unless the user explicitly asks to change them. Customization prompts should focus on "
             "the requested delta, not regenerate a completely different ring."
+        ),
+    },
+    {
+        "id": "edit_preserve_pose_crop_background",
+        "category": "Ring_Customization",
+        "title": "Preserve Pose Crop and Background",
+        "tags": ["edit", "pose", "crop", "background"],
+        "content": (
+            "Image edits should keep the original camera angle, crop, framing, lighting direction, "
+            "and background whenever the request is about adding or removing a local detail. The "
+            "input image should remain the authoritative reference for global composition."
+        ),
+    },
+    {
+        "id": "edit_delta_only_locality",
+        "category": "Ring_Customization",
+        "title": "Edit Only the Requested Local Region",
+        "tags": ["edit", "delta-only", "locality"],
+        "content": (
+            "For in-place ring edits, modify only the smallest necessary region. Do not redesign the "
+            "whole ring, change the band silhouette, or introduce unrelated decorative elements when "
+            "the user asked for a local addition, deletion, or correction."
+        ),
+    },
+    {
+        "id": "edit_removal_restore_surface",
+        "category": "Ring_Customization",
+        "title": "Removal Edits Must Restore the Surface",
+        "tags": ["edit", "removal", "surface"],
+        "content": (
+            "If the user requests deletion or removal, erase only the specified detail and restore the "
+            "surrounding metal, texture, and reflections naturally. Removal should not leave obvious "
+            "artifacts, replacement ornaments, or a redesigned ring body."
         ),
     },
     {
@@ -285,9 +341,8 @@ CURATED_RULES = [
 
 def _build_vector_store(persist_directory: str):
     from langchain_chroma import Chroma
-    from langchain_ollama import OllamaEmbeddings
 
-    embedder = OllamaEmbeddings(model=EMBEDDING_MODEL, base_url=config.OLLAMA_BASE_URL)
+    embedder = VLLMEmbeddingFunction(model=config.VLLM_EMBED_MODEL or EMBEDDING_MODEL)
     return Chroma(
         collection_name=COLLECTION_NAME,
         embedding_function=embedder,

@@ -1,1 +1,16 @@
 __pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+.env
+.pytest_cache/
+.mypy_cache/
+
+data/
+
+input_images/*
+!input_images/.gitkeep
+
+output_images/*
+!output_images/.gitkeep

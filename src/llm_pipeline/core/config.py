@@ -4,9 +4,19 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
-    # LLM Settings
-    OLLAMA_MODEL: str = "gemma4:26b"
-    OLLAMA_BASE_URL: str = "http://localhost:11434"
+    # vLLM chat / multimodal inference
+    VLLM_CHAT_BASE_URL: str = "http://127.0.0.1:8000/v1"
+    VLLM_CHAT_MODEL: str = "gemma4-26b"
+    VLLM_CHAT_API_KEY: str = "EMPTY"
+
+    # vLLM embedding inference
+    VLLM_EMBED_BASE_URL: str = "http://127.0.0.1:8001/v1"
+    VLLM_EMBED_MODEL: str = "BAAI/bge-m3"
+    VLLM_EMBED_API_KEY: str = "EMPTY"
+
+    # Short responses keep validator/prompt latency stable on repeated calls.
+    VLLM_VALIDATOR_MAX_TOKENS: int = 120
+    VLLM_PROMPT_MAX_TOKENS: int = 256
 
     # Backend Webhook
     WEBHOOK_URL: str = "https://graduation-work-backend.onrender.com/api/model-result"

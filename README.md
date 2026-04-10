@@ -1,24 +1,21 @@
 # 반지 커스텀 다각도 3D 생성용 LLM 백엔드
 
-LangGraph 기반으로 반지 시안 생성, 커스텀 편집, 다각도 추출, Vision 검수를 오케스트레이션하는 백엔드 워커입니다. 현재 프로젝트의 기준 도메인은 `반지` 이고, 기본 모델은 `gemma4:26b` 입니다.
+LangGraph, `vLLM`, ComfyUI, Vision 검수를 조합해 반지 시안 생성부터 커스텀 수정, 다각도 추출까지 오케스트레이션하는 졸업작품용 LLM 백엔드입니다. 현재 기준 도메인은 `반지`이며, 추론은 `Gemma4 26B` 계열 멀티모달 모델과 별도 임베딩 모델을 `vLLM OpenAI-compatible endpoint`로 서빙하는 구성을 기준으로 합니다.
 
-## 핵심 시나리오
-- `text`
-  - `RAG -> 1차 생성 -> 검수 -> 1차 휴게소`
-  - 유저가 `합격` 하면 `다각도 생성 -> 검수 -> 종료`
-  - 유저가 `각인 수정` 을 누르면 `수정 -> 검수 -> 2차 휴게소`
-  - 2차 휴게소에서 `합격` 시 `다각도 생성 -> 검수 -> 종료`
-- `image_and_text`
-  - `1단계 스킵 -> 수정 -> 검수 -> 2차 휴게소`
-  - 유저가 `합격` 하면 `다각도 생성 -> 검수 -> 종료`
-  - 유저가 `재수정` 하면 다시 수정 루프로 진입
-- `image_only`
-  - `1, 2단계 스킵 -> 다각도 생성 -> 검수 -> 종료`
-  - 기본적으로 휴게소 없음
+## 프로젝트 개요
+- `text`: 텍스트만 받아 베이스 반지를 생성하고, 사용자 승인 후 다각도 이미지를 만듭니다.
+- `image_and_text`: 기존 반지 이미지를 입력받아 텍스트 수정 요청을 반영한 뒤, 사용자 승인 후 다각도 이미지를 만듭니다.
+- `image_only`: 완성된 반지 이미지를 입력받아 다각도 이미지와 배경 제거 결과를 바로 만듭니다.
+- 입력 이미지 가드레일과 Vision 검수는 생성 품질을 지키기 위한 안전장치이며, 시스템 오류는 보정으로 위장하지 않고 즉시 실패 처리합니다.
 
-`validate_input_image` 같은 배경/누끼 가드레일은 시나리오 2/3 진입 전에만 동작하는 내부 보정 단계입니다. 여기서 내부 보정은 배경 대비 문제가 명확할 때만 수행하고, 이미지 다운로드 실패나 Vision LLM 오류 같은 시스템 오류는 보정으로 위장하지 않고 즉시 실패 처리합니다. 특히 `image_only` 에서 내부 보정용 `edit_image` 를 타더라도 사용자 휴게소를 추가하지 않습니다.
-시나리오 1의 `validate_base_image` 도 이제 반지 요청 반영 여부뿐 아니라, 배경이 반지 재질과 충분히 보색/고대비인지 함께 검수합니다.
-ComfyUI 호출 자체가 실패하면 Vision 검수로 넘어가 재시도하지 않고, 해당 HTTP/실행 오류 메시지를 그대로 최종 실패 메시지로 반환합니다.
+상세 파이프라인 계약, 액션 이름, 상태 전이, 검수 정책은 `src/llm_pipeline/README.md`를 단일 기준 문서로 봅니다.
+
+## 전체 아키텍처 요약
+- `src/llm_pipeline/pipelines.py`: 외부 엔트리포인트 `process_generation_request()`를 제공합니다.
+- `src/llm_pipeline/agent.py`: LangGraph 상태 그래프와 휴게소 인터럽트 지점을 정의합니다.
+- `src/llm_pipeline/nodes/`: 라우팅, RAG 조회, ComfyUI 생성, Vision 검수를 담당합니다.
+- `src/llm_pipeline/core/`: 설정, Pydantic 스키마, vLLM OpenAI-compatible 클라이언트를 둡니다.
+- `src/llm_pipeline/scripts/`: `db_feeder.py` 같은 보조 실행 스크립트를 둡니다.
 
 ## 설치
 ```bash
@@ -26,85 +23,104 @@ pip install -r requirements.txt
 ```
 
 ## 환경 변수
+`.env` 또는 시스템 환경 변수로 아래 값을 설정할 수 있습니다.
+
 ```env
-OLLAMA_MODEL=gemma4:26b
-OLLAMA_BASE_URL=http://localhost:11434
+VLLM_CHAT_BASE_URL=http://127.0.0.1:8000/v1
+VLLM_CHAT_MODEL=gemma4-26b
+VLLM_CHAT_API_KEY=EMPTY
+VLLM_EMBED_BASE_URL=http://127.0.0.1:8001/v1
+VLLM_EMBED_MODEL=BAAI/bge-m3
+VLLM_EMBED_API_KEY=EMPTY
+VLLM_VALIDATOR_MAX_TOKENS=120
+VLLM_PROMPT_MAX_TOKENS=256
+WEBHOOK_URL=https://graduation-work-backend.onrender.com/api/model-result
 COMFYUI_URL=http://127.0.0.1:8188
 COMFYUI_HISTORY_TIMEOUT_SECONDS=300
 VECTOR_DB_PATH=./data/chroma_db
-WEBHOOK_URL=https://graduation-work-backend.onrender.com/api/model-result
 ALLOW_VALIDATION_BYPASS=false
 MULTI_VIEW_VALIDATION_SAMPLE_COUNT=2
 ```
 
-`ALLOW_VALIDATION_BYPASS=true` 를 주면 Vision 검수 오류를 개발용으로만 우회할 수 있습니다. 기본값은 `false` 입니다.
-`MULTI_VIEW_VALIDATION_SAMPLE_COUNT` 는 다각도 결과 중 대표 샘플 몇 장만 Vision 검수할지 정합니다.
-
-## 백엔드 연동
-- 파이프라인 본체는 최종 `success` 응답 시 `WEBHOOK_URL` 로 결과를 POST 하도록 구현되어 있습니다.
-- 현재 웹훅 payload 는 `status`, `thread_id`, `images`, `prompt_used` 를 포함합니다.
-- 기본 설정은 `https://graduation-work-backend.onrender.com/api/model-result` 입니다.
-- 데모용 `test_run.py` 는 로컬 확인 전용이라 실행 시작 시 `config.WEBHOOK_URL = "NONE"` 으로 바꿔서 전송을 막습니다.
-- 실제 백엔드 연동 테스트를 하려면 `test_run.py` 를 쓰지 말고, 앱 서버나 별도 호출 코드에서 `process_generation_request()` 를 사용하거나 `test_run.py` 의 해당 줄을 비활성화해야 합니다.
-
-## ComfyUI JSON 취급 원칙
-- `image_z_image_turbo (2).json`
-- `image_qwen_image_edit_2509.json`
-- `templates-1_click_multiple_character_angles-v1.0 (3).json`
-
-이 파일들은 ComfyUI API format JSON 으로 취급합니다. 저장소에서는 JSON 자체를 수정하지 않고, Python 런타임이 파일을 읽은 뒤 메모리상에서 prompt 값과 `LoadImage.inputs.image` 만 동적으로 주입해서 ComfyUI 로 전송합니다. 중간 생성 결과가 output URL 로 생기면, 다음 edit/multi-view 단계에 넘기기 전에 다시 ComfyUI input 파일로 브리지합니다.
+- `ALLOW_VALIDATION_BYPASS=true`는 Vision 검수 오류를 개발용으로만 우회합니다.
+- `MULTI_VIEW_VALIDATION_SAMPLE_COUNT`는 다각도 결과 중 Vision 검수에 사용할 대표 샘플 수입니다.
+- `VLLM_VALIDATOR_MAX_TOKENS`는 검수 JSON 응답 길이를 짧게 제한해 반복 검수 지연을 줄입니다.
+- `VLLM_PROMPT_MAX_TOKENS`는 베이스 프롬프트 보강 응답 길이를 제한합니다.
 
 ## 실행 준비
-1. Ollama 에 `gemma4:26b` 를 준비합니다.
-2. ComfyUI 를 로컬에서 띄웁니다.
-3. 처음 1회는 벡터 DB 를 적재합니다.
+1. 채팅·비전 추론용 `vLLM` 인스턴스를 실행합니다.
+2. 임베딩 전용 `vLLM` 인스턴스를 실행합니다.
+3. ComfyUI를 로컬에서 실행합니다.
+4. 최초 1회 또는 임베딩 모델 변경 시 벡터 DB를 다시 적재합니다.
 
 ```bash
 python -m src.llm_pipeline.scripts.db_feeder
 ```
 
-`db_feeder.py` 는 전용 Chroma 컬렉션을 새로 채우는 방식으로 동작하므로, 다시 실행해도 같은 규칙이 중복 적재되지 않습니다. 현재는 반지 재질, 보색 배경, 각인, 수정, 다각도, rembg 검수 규칙을 묶어서 적재합니다.
+## 실행 방법
+애플리케이션 서버나 별도 호출 코드에서는 `process_generation_request()`를 직접 사용합니다.
 
-## 사용 예시
 ```python
 from src.llm_pipeline.core.schemas import PipelineRequest
 from src.llm_pipeline.pipelines import process_generation_request
 
 request = PipelineRequest(
+    thread_id="demo-thread",
+    action="start",
     input_type="text",
     prompt="18k 화이트골드에 얇은 곡선 각인이 들어간 커플링",
 )
 
 result = process_generation_request(request)
 
-if result.status == "success":
-    print(result.optimized_image_urls)
-elif result.status == "waiting_for_user":
+if result.status == "waiting_for_user":
     print(result.base_image_url)
+elif result.status == "success":
+    print(result.optimized_image_urls)
+else:
+    print(result.message)
 ```
 
-## 입력 타입 정규화
-외부에서는 아래 값을 모두 받을 수 있지만 내부에서는 payload 형태 기준으로 정규화됩니다.
+로컬 수동 시연은 아래 명령으로 실행할 수 있습니다.
 
-- `text`
-- `image`
-- `modification`
-- `image_only`
-- `image_and_text`
+```bash
+python test_run.py
+```
 
-정규화 규칙은 아래와 같습니다.
+`test_run.py`는 데모 전용 스크립트이며 시작 시 `WEBHOOK_URL`을 `NONE`으로 바꿔 외부 전송을 막습니다.
 
-- `image_url` 없음 + `prompt` 있음: `text`
-- `image_url` 있음 + `prompt` 없음: `image_only`
-- `image_url` 있음 + `prompt` 있음: `image_and_text`
+`thread_id`는 모든 요청에서 반드시 명시해야 합니다. 특히 `accept_base`와 `request_customization` 같은 후속 액션은 최초 `start`와 동일한 `thread_id`를 그대로 사용해야 합니다.
 
-추가로 입력 계약은 아래를 따릅니다.
+## 폴더 구조
+```text
+.
+|-- README.md
+|-- AGENTS.md
+|-- requirements.txt
+|-- test_run.py
+|-- tests/
+|-- input_images/
+|-- output_images/
+`-- src/
+    `-- llm_pipeline/
+        |-- README.md
+        |-- agent.py
+        |-- pipelines.py
+        |-- core/
+        |-- nodes/
+        `-- scripts/
+```
 
-- `action="start"` 는 `prompt` 또는 `image_url` 중 하나 이상이 반드시 있어야 합니다.
-- `action="request_customization"` 는 `customization_prompt` 가 반드시 있어야 합니다.
+`input_images/`와 `output_images/`는 로컬 데모 실행용 폴더이며, 실제 이미지 산출물은 Git에 포함하지 않습니다.
 
-## Human-in-the-loop 상태
-- `waiting_for_user`: 베이스 반지 시안 검토 대기
-- `waiting_for_user_edit`: 커스텀 반영본 검토 대기
-- `success`: 최종 다각도 이미지 생성 완료
-- `failed`: 생성 또는 검수 실패
+## 문서 맵
+- `README.md`: 사람용 프로젝트 개요, 설치, 실행, 폴더 구조
+- `AGENTS.md`: Codex 작업 원칙, 우선순위, 테스트, 출력 형식
+- `src/llm_pipeline/README.md`: 파이프라인 계약의 단일 기준 문서
+- `src/llm_pipeline/scripts/README.md`: `db_feeder.py` 운영 메모
+
+## 사용 중 주의사항
+- ComfyUI 템플릿 JSON은 저장소에서 직접 수정하지 않고 런타임에 필요한 값만 주입하는 전제로 관리합니다.
+- 입력 타입, 액션, 상태 이름은 사람이 읽기 쉬운 표현보다 API 계약 이름을 기준으로 맞추는 것이 안전합니다.
+- 문서 중 파이프라인 흐름 관련 세부 규칙은 루트가 아니라 `src/llm_pipeline/README.md`에서 관리합니다.
+- 추론 백엔드는 `vLLM OpenAI-compatible endpoint`를 기준으로 하며, 배포 시 양자화 모델 선택은 환경변수에 주입된 모델명 책임으로 둡니다.

@@ -8,11 +8,10 @@ from urllib.parse import parse_qs, unquote, urlencode, urlparse
 from typing import Optional
 
 import requests
-from langchain_core.messages import HumanMessage
-from langchain_ollama import ChatOllama
 
 from ..core.config import config
 from ..core.schemas import AgentState
+from ..core.vllm_client import invoke_text_prompt
 from .rag import retrieve_rules_for_query
 
 logger = logging.getLogger(__name__)
@@ -28,7 +27,7 @@ def _resolve_template_path(*candidates: str) -> Path:
     raise FileNotFoundError(f"None of the ComfyUI template files were found: {', '.join(candidates)}")
 
 
-BASE_TEMPLATE_PATH = _resolve_template_path("image_z_image_turbo (2).json", "image_z_image_turbo.json")
+BASE_TEMPLATE_PATH = _resolve_template_path("image_z_image_turbo (2).json")
 EDIT_TEMPLATE_PATH = _resolve_template_path("image_qwen_image_edit_2509.json")
 MULTI_VIEW_TEMPLATE_PATH = _resolve_template_path("templates-1_click_multiple_character_angles-v1.0 (3) (1).json")
 
@@ -38,6 +37,22 @@ def _truncate_text(text: str, max_len: int = 400) -> str:
     if len(compact) <= max_len:
         return compact
     return f"{compact[:max_len]}..."
+
+
+def _dedupe_prompt_segments(*segments: str) -> str:
+    parts: list[str] = []
+    seen: set[str] = set()
+
+    for segment in segments:
+        for raw_part in (segment or "").split(","):
+            part = raw_part.strip(" ,")
+            key = " ".join(part.lower().split())
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            parts.append(part)
+
+    return ", ".join(parts)
 
 
 def _comfy_result(image_urls: Optional[list[str]] = None, error_message: str = "") -> dict:
@@ -146,10 +161,26 @@ def _infer_background_spec(text: str) -> str:
 
 def _enforce_background_contrast(prompt: str, source_text: str) -> str:
     background_spec = _infer_background_spec(source_text)
-    enforced = (
-        f"{prompt}, perfectly isolated ring, extremely strong silhouette separation, "
-        f"flat {background_spec} background, no gradient, no texture, no props, "
-        "no background reflections, no cast objects, crisp inner-hole separation"
+    enforced = _dedupe_prompt_segments(
+        prompt,
+        config.TRELLIS_REQUIRED_PROMPT,
+        "perfectly isolated ring",
+        "single centered ring product photo",
+        "extremely strong silhouette separation",
+        f"single flat {background_spec} studio background",
+        "background color must strongly contrast with the ring material",
+        "clearly visible empty inner hole",
+        "clean contour edges",
+        "no gradient",
+        "no texture",
+        "no props",
+        "no hands",
+        "no fingers",
+        "no jewelry box",
+        "no table",
+        "no extra jewelry",
+        "no background reflections",
+        "no cast objects",
     )
     return " ".join(enforced.split())
 
@@ -193,11 +224,21 @@ def _detect_customization_kind(custom_prompt: str) -> str:
     return "general"
 
 
+def _detect_edit_operation(custom_prompt: str) -> str:
+    lower = (custom_prompt or "").lower()
+    if any(token in lower for token in ("remove", "delete", "erase", "without", "제거", "삭제", "없애", "지워", "빼")):
+        return "remove"
+    if any(token in lower for token in ("add", "insert", "attach", "include", "추가", "넣", "달아", "배치")):
+        return "add"
+    return "modify"
+
+
 def _build_customization_context(state: AgentState) -> tuple[str, str, str]:
     custom_prompt = state.get("customization_prompt") or state.get("user_prompt", "")
     base_prompt = state.get("synthesized_prompt", "")
-    query = custom_prompt or base_prompt or state.get("user_prompt", "")
-    rag_context = retrieve_rules_for_query(query, top_k=4)
+    user_prompt = state.get("user_prompt", "")
+    query = " ".join(part for part in (custom_prompt, base_prompt, user_prompt) if part).strip()
+    rag_context = retrieve_rules_for_query(query, top_k=6)
     customization_kind = _detect_customization_kind(custom_prompt)
     engraving_text = _extract_engraving_text(custom_prompt) if customization_kind == "engraving" else ""
     return rag_context, customization_kind, engraving_text
@@ -207,11 +248,37 @@ def _compose_edit_prompt(state: AgentState, rag_context: str, customization_kind
     custom_prompt = (state.get("customization_prompt") or state.get("user_prompt", "")).strip()
     base_prompt = (state.get("synthesized_prompt") or "").strip()
     base_descriptor = f"Base ring description: {base_prompt}. " if base_prompt else ""
+    edit_operation = _detect_edit_operation(custom_prompt)
+    preservation_prefix = (
+        f"{base_descriptor}"
+        "Use the provided input ring image as the authoritative source. "
+        "Keep the same ring identity, same composition, same camera angle, same crop, same scale, "
+        "same lighting direction, same material, same reflections, and same background unless the user explicitly requests a change. "
+        "Do not redesign the whole ring. Do not generate a different ring. "
+        "Make only the minimum local change needed for the requested edit. "
+    )
+
+    if edit_operation == "remove":
+        operation_clause = (
+            "Remove only the specifically requested detail and leave all untouched regions unchanged. "
+            "Restore the surrounding metal or surface naturally after removal. "
+            "Do not add replacement decorations or redesign neighboring geometry. "
+        )
+    elif edit_operation == "add":
+        operation_clause = (
+            "Add only the specifically requested new detail and keep every untouched region unchanged. "
+            "Do not alter unrelated parts of the band, background, framing, or overall design. "
+        )
+    else:
+        operation_clause = (
+            "Modify only the specifically requested region or attribute and keep all unrelated areas unchanged. "
+            "Preserve the original ring as much as possible outside the edited area. "
+        )
 
     if customization_kind == "engraving" and engraving_text:
         return (
-            f"{base_descriptor}"
-            f"Preserve the original ring design, material, thickness, geometry, reflections, and camera angle. "
+            f"{preservation_prefix}"
+            f"{operation_clause}"
             f"Engrave only the exact text '{engraving_text}' on the visible front outer band unless the user explicitly requested inner-band placement. "
             "The engraving must be physically carved into the metal surface, follow the ring curvature naturally, "
             "share the same lighting, bevel, reflections, and shadow logic as the band, and feel like real jewelry craftsmanship. "
@@ -221,15 +288,17 @@ def _compose_edit_prompt(state: AgentState, rag_context: str, customization_kind
 
     if customization_kind == "gemstone":
         return (
-            f"{base_descriptor}"
+            f"{preservation_prefix}"
+            f"{operation_clause}"
             f"Apply only this requested ring customization: {custom_prompt}. "
-            "Integrate the gemstone naturally into the ring structure, preserving the existing band shape and material unless explicitly changed. "
-            "The added stone must look physically mounted, proportionate, and harmonized with the ring design, not pasted on top. "
+            "Integrate gemstone changes naturally into the ring structure, preserving the existing band shape and material unless explicitly changed. "
+            "Any added stone must look physically mounted, proportionate, and harmonized with the ring design, not pasted on top. "
             f"Relevant ring-editing rules: {rag_context}"
         )
 
     return (
-        f"{base_descriptor}"
+        f"{preservation_prefix}"
+        f"{operation_clause}"
         f"Apply only this requested ring customization: {custom_prompt}. "
         "Preserve the original ring geometry, material, finish, and overall composition unless the user explicitly asked to change them. "
         "Any new detail must look integrated into the ring itself, never floating or overlaid. "
@@ -410,14 +479,10 @@ def generate_base_image(state: AgentState) -> dict:
     """
     user_prompt = state.get("user_prompt", "")
     rag_context = state.get("rag_context", "")
+    contrast_source = f"{user_prompt} {rag_context}".strip()
+    background_spec = _infer_background_spec(contrast_source)
 
-    logger.info("Enhancing prompt using Gemma 4 & RAG rules...")
-
-    llm = ChatOllama(
-        model=config.OLLAMA_MODEL,
-        base_url=config.OLLAMA_BASE_URL,
-        temperature=0.3,
-    )
+    logger.info("Enhancing prompt using vLLM chat model & RAG rules...")
 
     sys_prompt = f"""
 You are an expert jewelry prompt engineer for Stable Diffusion.
@@ -425,22 +490,34 @@ User requested: '{user_prompt}'
 RAG Rules to follow: '{rag_context}'
 
 Your task:
-1. Identify the ring's design and color/material from the user's request.
-2. Based on the RAG rules, calculate the exact complementary background color.
-3. The background must be a flat, single-color, non-textured studio background optimized for clean alpha matting.
-4. Output only a comma-separated keywords prompt. It must end with 'solid [COLOR] background'.
+1. Identify the ring's design, material, and finish from the user's request.
+2. Choose a background that strongly contrasts with the dominant ring material and keeps the outer silhouette and inner hole clearly separated.
+3. The background must be exactly one flat studio color. For this request, prefer '{background_spec}' if it fits the material guidance.
+4. Keep the ring as the only subject, centered, isolated, and suitable for rembg/TRELLIS extraction.
+5. Avoid props, hands, fingers, boxes, tables, texture, gradient, scenery, and extra jewelry.
+6. Output only one line of comma-separated keywords, optimized for image generation. Include the exact background color explicitly.
 No conversational text and no quotes.
 """
 
     try:
-        resp = llm.invoke([HumanMessage(content=sys_prompt)])
-        enhanced_prompt = resp.content.strip()
+        enhanced_prompt = invoke_text_prompt(
+            prompt=sys_prompt,
+            temperature=0.3,
+            max_tokens=config.VLLM_PROMPT_MAX_TOKENS,
+        )
     except Exception as exc:
         logger.warning(f"Prompt enhancement failed: {exc}. Using original prompt.")
-        enhanced_prompt = f"{user_prompt}, highly detailed, solid dark background"
+        enhanced_prompt = _dedupe_prompt_segments(
+            user_prompt,
+            config.TRELLIS_REQUIRED_PROMPT,
+            f"single flat {background_spec} studio background",
+            "background color must strongly contrast with the ring material",
+            "clearly visible empty inner hole",
+            "single centered ring product photo",
+        )
 
-    enhanced_prompt = _enforce_background_contrast(enhanced_prompt, f"{user_prompt} {rag_context}")
-    logger.info(f"Gemma 4 enhanced prompt: {enhanced_prompt}")
+    enhanced_prompt = _enforce_background_contrast(enhanced_prompt, contrast_source)
+    logger.info(f"vLLM enhanced prompt: {enhanced_prompt}")
 
     try:
         comfyui_payload = _build_base_payload(enhanced_prompt)
