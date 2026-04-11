@@ -2,6 +2,8 @@
 
 `src/llm_pipeline/`는 반지 커스텀 파이프라인의 실제 실행 패키지입니다. 이 문서는 파이프라인 흐름, 입력 계약, 상태 전이, 검수 정책의 단일 기준 문서입니다.
 
+계약이 바뀌면 `tests.test_pipeline_contract`도 함께 맞춰 문서와 자동 검증이 같은 기준을 보도록 유지합니다.
+
 ## 패키지 역할
 - `pipelines.py`: 외부 엔트리포인트 `process_generation_request()`와 동기 응답 포맷을 담당합니다.
 - `agent.py`: LangGraph 상태 그래프, 인터럽트 지점, 조건부 분기를 정의합니다.
@@ -12,6 +14,7 @@
 ## 추론 백엔드 전제
 - 채팅·비전 추론은 `VLLM_CHAT_*` 설정을 사용하는 `vLLM` 인스턴스 1개를 기준으로 합니다.
 - 임베딩은 `VLLM_EMBED_*` 설정을 사용하는 별도 `vLLM` 인스턴스 1개를 기준으로 합니다.
+- HITL 체크포인터는 기본적으로 `LANGGRAPH_CHECKPOINT_DB_PATH`의 SQLite 파일을 사용합니다.
 - validator 호출은 stateless 1회 요청 구조를 유지합니다.
 - 검수 병목 완화를 위해 validator와 prompt enhancement는 각각 짧은 `max_tokens` 제한을 둡니다.
 
@@ -137,10 +140,9 @@ UI나 데모에서는 사람 친화적인 표현을 써도 되지만, 실제 계
 - `VLLM_EMBED_BASE_URL`
 - `VLLM_EMBED_MODEL`
 - `VLLM_EMBED_API_KEY`
-- `VLLM_VALIDATOR_MAX_TOKENS`
-- `VLLM_PROMPT_MAX_TOKENS`
 
 `VLLM_CHAT_MODEL`은 배포 환경에서 실제 서빙하는 Gemma4 26B 계열 모델명으로 주입합니다. `Q4_K_M`, `Q5_K_M` 같은 양자화 선택은 코드가 아니라 배포 설정 책임입니다.
+토큰 제한, 타임아웃, 재시도 상한, RAG 조회 개수, 기본 프롬프트 보강값은 환경 정보가 아니라 내부 튜닝값이므로 `src/llm_pipeline/core/config.py` 기본값으로 관리합니다.
 
 ## ComfyUI 템플릿 정책
 현재 저장소에서 사용하는 ComfyUI 템플릿 파일은 아래 세 개입니다.
@@ -159,6 +161,9 @@ UI나 데모에서는 사람 친화적인 표현을 써도 되지만, 실제 계
 
 ## 웹훅과 HITL 흐름
 - 기본 호출 단위는 `process_generation_request()`의 동기 응답입니다.
+- 후속 액션(`accept_base`, `request_customization`)은 저장된 checkpoint가 남아 있는 `thread_id`에서만 유효합니다.
+- 기본 SQLite 체크포인터를 쓰면 같은 checkpoint DB 파일을 유지하는 한 프로세스 재시작 뒤에도 pause 상태를 이어갈 수 있습니다.
+- 현재 개발 환경에 `langgraph-checkpoint-sqlite`가 없으면 경고 후 `MemorySaver`로 임시 fallback합니다.
 - `success`가 나왔고 `WEBHOOK_URL`이 설정되어 있으며 `NONE`이 아니면, 추가로 결과를 웹훅으로 POST합니다.
 - 현재 성공 웹훅 payload는 `status`, `thread_id`, `images`, `prompt_used`를 포함합니다.
 - `waiting_for_user`, `waiting_for_user_edit`, `failed`는 현재 웹훅을 보내지 않고 동기 응답으로만 반환됩니다.

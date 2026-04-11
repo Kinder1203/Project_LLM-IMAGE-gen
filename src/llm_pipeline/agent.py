@@ -1,6 +1,16 @@
+import logging
+import sqlite3
+from pathlib import Path
+
 from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.memory import MemorySaver
 
+try:
+    from langgraph.checkpoint.sqlite import SqliteSaver
+except ModuleNotFoundError:
+    SqliteSaver = None
+
+from .core.config import config
 from .core.schemas import AgentState
 
 from .nodes.router import multimodal_intent_router, intent_router_condition
@@ -8,6 +18,23 @@ from .nodes.rag import retrieve_ring_context
 
 from .nodes.synthesizer import generate_base_image, edit_image, generate_multi_view
 from .nodes.validator import validate_base_image, validate_edited_image, validate_rembg, validate_input_image
+
+logger = logging.getLogger(__name__)
+
+
+def build_checkpointer():
+    checkpoint_path = Path(config.LANGGRAPH_CHECKPOINT_DB_PATH)
+    checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
+
+    if SqliteSaver is None:
+        logger.warning(
+            "langgraph-checkpoint-sqlite is not installed. Falling back to MemorySaver. "
+            "Install requirements and restart to enable SQLite persistence."
+        )
+        return MemorySaver()
+
+    connection = sqlite3.connect(str(checkpoint_path), check_same_thread=False)
+    return SqliteSaver(connection)
 
 def check_base_validation(state: AgentState) -> str:
     is_valid = state.get("is_valid", False)
@@ -21,7 +48,7 @@ def check_base_validation(state: AgentState) -> str:
         # 합격하면 사용자 승인 대기 전용 빈 노드로 이동
         return "wait_for_user_approval"
     
-    if retries >= 3:
+    if retries >= config.BASE_VALIDATION_MAX_RETRIES:
         return "end"
     return "generate_base_image"
 
@@ -40,7 +67,7 @@ def check_edit_validation(state: AgentState) -> str:
             return "generate_multi_view"
         return "wait_for_edit_approval"
     
-    if retries >= 3:
+    if retries >= config.EDIT_VALIDATION_MAX_RETRIES:
         return "end"
     return "edit_image"
 
@@ -55,7 +82,7 @@ def check_rembg_validation(state: AgentState) -> str:
     if is_valid:
         return "end"
     
-    if retries >= 3:
+    if retries >= config.REMBG_VALIDATION_MAX_RETRIES:
         return "end"
     return "generate_multi_view"
 
@@ -96,8 +123,8 @@ def build_ring_generation_graph():
     """ LangGraph 빌드 (조건부 분기 및 Human-in-the-loop 적용) """
     workflow = StateGraph(AgentState)
     
-    # 1. 메모리 세이버 (Interrupt 지원)
-    checkpointer = MemorySaver()
+    # 1. 체크포인터 (기본: SQLite, 미설치 시 임시 MemorySaver fallback)
+    checkpointer = build_checkpointer()
     
     # 2. 노드 등록
     workflow.add_node("intent_router", multimodal_intent_router)

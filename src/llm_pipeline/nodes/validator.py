@@ -1,9 +1,11 @@
 import base64
 import json
 import logging
+from io import BytesIO
 from urllib.parse import quote
 
 import requests
+from PIL import Image, UnidentifiedImageError
 
 from ..core.config import config
 from ..core.schemas import AgentState
@@ -59,6 +61,18 @@ def _handle_validation_error(reason: str) -> dict:
     return _validation_result(False, reason, result_type="system_error")
 
 
+def _detect_image_mime_type(image_bytes: bytes, response_content_type: str = "") -> str:
+    normalized = (response_content_type or "").split(";")[0].strip().lower()
+    if normalized.startswith("image/"):
+        return normalized
+
+    try:
+        with Image.open(BytesIO(image_bytes)) as image:
+            return (Image.MIME.get(image.format) or "image/png").lower()
+    except (UnidentifiedImageError, OSError, ValueError):
+        return "image/png"
+
+
 def _encode_image_from_url(image_url: str) -> str:
     """ComfyUI에서 생성된 이미지를 다운로드하여 Base64로 변환"""
     if not image_url:
@@ -70,9 +84,11 @@ def _encode_image_from_url(image_url: str) -> str:
             # Uploaded ComfyUI input images are often passed around as plain filenames.
             resolved_url = f"{config.COMFYUI_URL.rstrip('/')}/view?filename={quote(image_url)}&type=input"
 
-        response = requests.get(resolved_url, timeout=10)
+        response = requests.get(resolved_url, timeout=config.IMAGE_DOWNLOAD_TIMEOUT_SECONDS)
         response.raise_for_status()
-        return base64.b64encode(response.content).decode("utf-8")
+        mime_type = _detect_image_mime_type(response.content, response.headers.get("Content-Type", ""))
+        encoded = base64.b64encode(response.content).decode("utf-8")
+        return f"data:{mime_type};base64,{encoded}"
     except Exception as exc:
         logger.warning(f"Failed to download image for validation: {exc}")
         return ""
@@ -80,14 +96,14 @@ def _encode_image_from_url(image_url: str) -> str:
 
 def _call_vision_judge(image_url: str, prompt: str) -> dict:
     """공통 Vision LLM 호출 유틸"""
-    img_base64 = _encode_image_from_url(image_url)
-    if not img_base64:
+    image_data_url = _encode_image_from_url(image_url)
+    if not image_data_url:
         return _handle_validation_error("검수용 이미지를 다운로드하지 못했습니다.")
 
     try:
         raw_content = invoke_multimodal_json(
             prompt=prompt,
-            image_data_url=f"data:image/png;base64,{img_base64}",
+            image_data_url=image_data_url,
             max_tokens=config.VLLM_VALIDATOR_MAX_TOKENS,
         )
 

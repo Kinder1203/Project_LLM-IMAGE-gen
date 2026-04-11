@@ -14,3 +14,5 @@ input_images/*
 
 output_images/*
 !output_images/.gitkeep
+
+.env

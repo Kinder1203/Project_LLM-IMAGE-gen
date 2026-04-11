@@ -17,14 +17,23 @@ from .rag import retrieve_rules_for_query
 logger = logging.getLogger(__name__)
 
 COMFY_URL = config.COMFYUI_URL.rstrip("/")
+REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
 def _resolve_template_path(*candidates: str) -> Path:
+    search_roots = (Path.cwd(), REPO_ROOT)
+
     for candidate in candidates:
-        path = Path(candidate)
-        if path.exists():
-            return path
-    raise FileNotFoundError(f"None of the ComfyUI template files were found: {', '.join(candidates)}")
+        candidate_path = Path(candidate)
+        paths_to_check = [candidate_path] if candidate_path.is_absolute() else [root / candidate_path for root in search_roots]
+
+        for path in paths_to_check:
+            if path.exists():
+                return path
+
+    raise FileNotFoundError(
+        f"None of the ComfyUI template files were found from cwd or repo root: {', '.join(candidates)}"
+    )
 
 
 BASE_TEMPLATE_PATH = _resolve_template_path("image_z_image_turbo (2).json")
@@ -72,7 +81,11 @@ def _sync_call_comfyui(payload: dict) -> dict:
         return _comfy_result(error_message=error_message)
 
     try:
-        response = requests.post(f"{COMFY_URL}/prompt", json=payload, timeout=10)
+        response = requests.post(
+            f"{COMFY_URL}/prompt",
+            json=payload,
+            timeout=config.COMFYUI_REQUEST_TIMEOUT_SECONDS,
+        )
         response.raise_for_status()
         prompt_id = response.json().get("prompt_id")
 
@@ -95,7 +108,10 @@ def _sync_call_comfyui(payload: dict) -> dict:
                 logger.error(error_message)
                 return _comfy_result(error_message=error_message)
 
-            hist_res = requests.get(f"{COMFY_URL}/history/{prompt_id}", timeout=10)
+            hist_res = requests.get(
+                f"{COMFY_URL}/history/{prompt_id}",
+                timeout=config.COMFYUI_REQUEST_TIMEOUT_SECONDS,
+            )
             hist_res.raise_for_status()
             hist_data = hist_res.json()
 
@@ -121,7 +137,7 @@ def _sync_call_comfyui(payload: dict) -> dict:
 
                 return _comfy_result(image_urls=image_urls)
 
-            time.sleep(2.0)
+            time.sleep(config.COMFYUI_POLL_INTERVAL_SECONDS)
 
     except requests.HTTPError as exc:
         status_code = exc.response.status_code if exc.response is not None else "unknown"
@@ -238,7 +254,7 @@ def _build_customization_context(state: AgentState) -> tuple[str, str, str]:
     base_prompt = state.get("synthesized_prompt", "")
     user_prompt = state.get("user_prompt", "")
     query = " ".join(part for part in (custom_prompt, base_prompt, user_prompt) if part).strip()
-    rag_context = retrieve_rules_for_query(query, top_k=6)
+    rag_context = retrieve_rules_for_query(query, top_k=config.CUSTOMIZATION_RAG_TOP_K)
     customization_kind = _detect_customization_kind(custom_prompt)
     engraving_text = _extract_engraving_text(custom_prompt) if customization_kind == "engraving" else ""
     return rag_context, customization_kind, engraving_text
@@ -310,7 +326,11 @@ def _upload_image_bytes_to_comfyui(image_bytes: bytes, filename_hint: str) -> st
     files = {
         "image": (filename_hint or "comfy_bridge.png", image_bytes, "application/octet-stream"),
     }
-    response = requests.post(f"{COMFY_URL}/upload/image", files=files, timeout=20)
+    response = requests.post(
+        f"{COMFY_URL}/upload/image",
+        files=files,
+        timeout=config.COMFYUI_UPLOAD_TIMEOUT_SECONDS,
+    )
     response.raise_for_status()
     uploaded_name = response.json().get("name")
     if not uploaded_name:
@@ -336,7 +356,7 @@ def _normalize_comfy_image_reference(image_ref: str) -> str:
         return filename
 
     logger.info(f"Bridging image reference into ComfyUI input upload: {image_ref}")
-    download_response = requests.get(image_ref, timeout=20)
+    download_response = requests.get(image_ref, timeout=config.IMAGE_BRIDGE_DOWNLOAD_TIMEOUT_SECONDS)
     download_response.raise_for_status()
     uploaded_name = _upload_image_bytes_to_comfyui(download_response.content, filename or "comfy_bridge.png")
     logger.info(f"Bridged ComfyUI image reference as input file: {uploaded_name}")

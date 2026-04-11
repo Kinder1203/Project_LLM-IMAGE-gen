@@ -7,6 +7,7 @@ from .core.schemas import PipelineRequest, PipelineResponse
 
 # 싱글톤 형태로 그래프 초기화
 app_graph = build_ring_generation_graph()
+WAITING_NODES = {"wait_for_user_approval", "wait_for_edit_approval"}
 
 
 def _build_initial_state(request: PipelineRequest) -> dict:
@@ -39,6 +40,23 @@ def _failed_response(message: str, base_image_url: str = "") -> PipelineResponse
     )
 
 
+def _validate_follow_up_thread(thread_config: dict) -> PipelineResponse | None:
+    saved_state = app_graph.get_state(thread_config)
+    saved_values = saved_state.values or {}
+    paused_nodes = tuple(saved_state.next or ())
+
+    if not saved_values:
+        return _failed_response("유효한 thread_id를 찾지 못했습니다. 먼저 start 액션으로 세션을 생성하세요.")
+
+    if not paused_nodes:
+        return _failed_response("이 thread_id는 현재 사용자 입력을 기다리는 상태가 아닙니다.")
+
+    if not any(node in WAITING_NODES for node in paused_nodes):
+        return _failed_response("이 thread_id는 현재 후속 액션을 받을 수 있는 휴게소 상태가 아닙니다.")
+
+    return None
+
+
 def process_generation_request(request: PipelineRequest) -> PipelineResponse:
     """
     외부 연동용 엔트리포인트.
@@ -58,11 +76,17 @@ def process_generation_request(request: PipelineRequest) -> PipelineResponse:
             app_graph.invoke(_build_initial_state(request), config=thread_config)
 
         elif request.action == "accept_base":
+            invalid_follow_up = _validate_follow_up_thread(thread_config)
+            if invalid_follow_up is not None:
+                return invalid_follow_up
             app_graph.update_state(thread_config, {"intent": "approved_base_only"})
             logger.info("Resuming LangGraph after accept_base.")
             app_graph.invoke(None, config=thread_config)
 
         elif request.action == "request_customization":
+            invalid_follow_up = _validate_follow_up_thread(thread_config)
+            if invalid_follow_up is not None:
+                return invalid_follow_up
             app_graph.update_state(
                 thread_config,
                 {
@@ -120,7 +144,11 @@ def process_generation_request(request: PipelineRequest) -> PipelineResponse:
                         "prompt_used": final_state.get("synthesized_prompt", ""),
                     }
                     logger.info(f"Sending Webhook to backend: {config.WEBHOOK_URL}")
-                    requests.post(config.WEBHOOK_URL, json=payload, timeout=5)
+                    requests.post(
+                        config.WEBHOOK_URL,
+                        json=payload,
+                        timeout=config.WEBHOOK_TIMEOUT_SECONDS,
+                    )
                 except Exception as exc:
                     logger.warning(f"Webhook 발송 무시됨: 백엔드 서버에 아직 연결되지 않았습니다. ({exc})")
 

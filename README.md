@@ -23,7 +23,7 @@ pip install -r requirements.txt
 ```
 
 ## 환경 변수
-`.env` 또는 시스템 환경 변수로 아래 값을 설정할 수 있습니다.
+`.env` 또는 시스템 환경 변수로 값을 설정할 수 있습니다. 현재 아래 값은 확정 배포값이 아니라, 코드 기본값과 로컬 예시를 함께 보여주는 용도입니다.
 
 ```env
 VLLM_CHAT_BASE_URL=http://127.0.0.1:8000/v1
@@ -32,17 +32,17 @@ VLLM_CHAT_API_KEY=EMPTY
 VLLM_EMBED_BASE_URL=http://127.0.0.1:8001/v1
 VLLM_EMBED_MODEL=BAAI/bge-m3
 VLLM_EMBED_API_KEY=EMPTY
-VLLM_VALIDATOR_MAX_TOKENS=120
-VLLM_PROMPT_MAX_TOKENS=256
 WEBHOOK_URL=https://graduation-work-backend.onrender.com/api/model-result
 COMFYUI_URL=http://127.0.0.1:8188
-COMFYUI_HISTORY_TIMEOUT_SECONDS=300
 VECTOR_DB_PATH=./data/chroma_db
+LANGGRAPH_CHECKPOINT_DB_PATH=./data/langgraph_checkpoints.sqlite
 ALLOW_VALIDATION_BYPASS=false
-MULTI_VIEW_VALIDATION_SAMPLE_COUNT=2
 ```
 
+환경별로 바뀌는 계약 키는 `.env`에서 관리하고, 내부 튜닝값과 유지보수용 기본값은 `src/llm_pipeline/core/config.py`를 기준으로 관리합니다.
+
 - `ALLOW_VALIDATION_BYPASS=true`는 Vision 검수 오류를 개발용으로만 우회합니다.
+- `LANGGRAPH_CHECKPOINT_DB_PATH`는 HITL 상태를 저장할 SQLite 체크포인트 파일 경로입니다.
 - `MULTI_VIEW_VALIDATION_SAMPLE_COUNT`는 다각도 결과 중 Vision 검수에 사용할 대표 샘플 수입니다.
 - `VLLM_VALIDATOR_MAX_TOKENS`는 검수 JSON 응답 길이를 짧게 제한해 반복 검수 지연을 줄입니다.
 - `VLLM_PROMPT_MAX_TOKENS`는 베이스 프롬프트 보강 응답 길이를 제한합니다.
@@ -90,6 +90,15 @@ python test_run.py
 `test_run.py`는 데모 전용 스크립트이며 시작 시 `WEBHOOK_URL`을 `NONE`으로 바꿔 외부 전송을 막습니다.
 
 `thread_id`는 모든 요청에서 반드시 명시해야 합니다. 특히 `accept_base`와 `request_customization` 같은 후속 액션은 최초 `start`와 동일한 `thread_id`를 그대로 사용해야 합니다.
+
+## 검증
+문서 계약과 런타임 핵심 가정은 아래 계약 테스트로 빠르게 확인할 수 있습니다.
+
+```bash
+python -m unittest tests.test_pipeline_contract
+```
+
+이 테스트는 ComfyUI 템플릿 shape, 요청/응답 스키마, LangGraph 휴게소 상태, `vLLM`/Chroma 연결 계약을 함께 확인합니다.
 
 ## 폴더 구조
 ```text

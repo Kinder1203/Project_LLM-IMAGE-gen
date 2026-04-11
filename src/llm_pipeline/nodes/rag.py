@@ -26,7 +26,7 @@ class RingVectorRAG:
             self.vector_store = None
             logger.warning("Vector DB not found! Please run `scripts/db_feeder.py` first.")
 
-    def search_ring_rules(self, query: str, top_k: int = 3) -> str:
+    def search_ring_rules(self, query: str, top_k: int | None = None) -> str:
         """가장 연관성이 높은 반지 소재 지식이나 프롬프트 팁을 문자열로 반환"""
         if not self.vector_store:
             return "No specific instructions found. Follow standard jewelry prompting."
@@ -35,7 +35,8 @@ class RingVectorRAG:
         
         try:
             # 단순 Vector Similarity Search 수행
-            results = self.vector_store.similarity_search(query, k=top_k)
+            search_top_k = top_k if top_k is not None else config.RAG_DEFAULT_TOP_K
+            results = self.vector_store.similarity_search(query, k=search_top_k)
             
             context_parts = []
             for doc in results:
@@ -48,7 +49,7 @@ class RingVectorRAG:
             return "Failure during context retrieval."
 
 
-def retrieve_rules_for_query(query: str, top_k: int = 3) -> str:
+def retrieve_rules_for_query(query: str, top_k: int | None = None) -> str:
     if not query.strip():
         return "No specific instructions found. Follow standard jewelry prompting."
     rag_engine = RingVectorRAG()
@@ -63,7 +64,7 @@ def retrieve_ring_context(state: AgentState) -> dict:
     logger.info("Executing Lightweight Vector RAG for Generative Rules...")
     
     rag_engine = RingVectorRAG()
-    real_context = rag_engine.search_ring_rules(prompt)
+    real_context = rag_engine.search_ring_rules(prompt, top_k=config.RAG_DEFAULT_TOP_K)
     
     logger.info(f"Retrieved 3D Control Rules Length: {len(real_context)}")
     return {"rag_context": real_context}

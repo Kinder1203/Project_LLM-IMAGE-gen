@@ -1,6 +1,7 @@
 import importlib
 import importlib.util
 import json
+import os
 import sys
 import unittest
 from pathlib import Path
@@ -19,6 +20,28 @@ HAS_DB_DEPS = all(
 
 
 class ExportedTemplateContractTests(unittest.TestCase):
+    def test_synthesizer_resolves_templates_from_non_root_cwd(self):
+        project_root = Path.cwd().resolve()
+        tests_dir = project_root / "tests"
+        original_cwd = Path.cwd()
+        original_module = sys.modules.pop("src.llm_pipeline.nodes.synthesizer", None)
+
+        try:
+            if str(project_root) not in sys.path:
+                sys.path.insert(0, str(project_root))
+            os.chdir(tests_dir)
+            synthesizer = importlib.import_module("src.llm_pipeline.nodes.synthesizer")
+        finally:
+            os.chdir(original_cwd)
+            if original_module is None:
+                sys.modules.pop("src.llm_pipeline.nodes.synthesizer", None)
+            else:
+                sys.modules["src.llm_pipeline.nodes.synthesizer"] = original_module
+
+        self.assertTrue(synthesizer.BASE_TEMPLATE_PATH.exists())
+        self.assertTrue(synthesizer.EDIT_TEMPLATE_PATH.exists())
+        self.assertTrue(synthesizer.MULTI_VIEW_TEMPLATE_PATH.exists())
+
     def test_base_template_is_api_prompt_format(self):
         template = json.loads(Path("image_z_image_turbo (2).json").read_text(encoding="utf-8"))
 
@@ -273,6 +296,108 @@ class PipelineRuntimeTests(unittest.TestCase):
             "end",
         )
 
+    def test_agent_retry_limits_follow_config(self):
+        agent = importlib.import_module("src.llm_pipeline.agent")
+        config = importlib.import_module("src.llm_pipeline.core.config").config
+
+        original_base = config.BASE_VALIDATION_MAX_RETRIES
+        original_edit = config.EDIT_VALIDATION_MAX_RETRIES
+        original_rembg = config.REMBG_VALIDATION_MAX_RETRIES
+
+        try:
+            config.BASE_VALIDATION_MAX_RETRIES = 1
+            config.EDIT_VALIDATION_MAX_RETRIES = 1
+            config.REMBG_VALIDATION_MAX_RETRIES = 1
+
+            self.assertEqual(agent.check_base_validation({"retry_count": 1, "is_valid": False}), "end")
+            self.assertEqual(agent.check_edit_validation({"retry_count": 1, "is_valid": False}), "end")
+            self.assertEqual(agent.check_rembg_validation({"retry_count": 1, "is_valid": False}), "end")
+        finally:
+            config.BASE_VALIDATION_MAX_RETRIES = original_base
+            config.EDIT_VALIDATION_MAX_RETRIES = original_edit
+            config.REMBG_VALIDATION_MAX_RETRIES = original_rembg
+
+    def test_agent_uses_sqlite_checkpointer_when_available(self):
+        agent = importlib.import_module("src.llm_pipeline.agent")
+        config = importlib.import_module("src.llm_pipeline.core.config").config
+
+        seen = {}
+        original_saver = agent.SqliteSaver
+        original_connect = agent.sqlite3.connect
+        original_path = config.LANGGRAPH_CHECKPOINT_DB_PATH
+
+        class FakeSqliteSaver:
+            def __init__(self, connection):
+                seen["connection"] = connection
+
+        try:
+            config.LANGGRAPH_CHECKPOINT_DB_PATH = "./data/test-checkpoints.sqlite"
+
+            def fake_connect(path, check_same_thread=True):
+                seen["path"] = path
+                seen["check_same_thread"] = check_same_thread
+                return object()
+
+            agent.SqliteSaver = FakeSqliteSaver
+            agent.sqlite3.connect = fake_connect
+            checkpointer = agent.build_checkpointer()
+        finally:
+            agent.SqliteSaver = original_saver
+            agent.sqlite3.connect = original_connect
+            config.LANGGRAPH_CHECKPOINT_DB_PATH = original_path
+
+        self.assertIsInstance(checkpointer, FakeSqliteSaver)
+        self.assertEqual(Path(seen["path"]), Path("./data/test-checkpoints.sqlite"))
+        self.assertFalse(seen["check_same_thread"])
+
+    def test_agent_falls_back_to_memory_saver_without_sqlite_dependency(self):
+        agent = importlib.import_module("src.llm_pipeline.agent")
+
+        original_saver = agent.SqliteSaver
+
+        try:
+            agent.SqliteSaver = None
+            checkpointer = agent.build_checkpointer()
+        finally:
+            agent.SqliteSaver = original_saver
+
+        self.assertIsInstance(checkpointer, agent.MemorySaver)
+
+    def test_environment_settings_only_override_environment_backed_fields(self):
+        config_module = importlib.import_module("src.llm_pipeline.core.config")
+        original_chat_base_url = os.environ.get("VLLM_CHAT_BASE_URL")
+        original_validator_tokens = os.environ.get("VLLM_VALIDATOR_MAX_TOKENS")
+        original_checkpoint_path = os.environ.get("LANGGRAPH_CHECKPOINT_DB_PATH")
+
+        try:
+            os.environ["VLLM_CHAT_BASE_URL"] = "http://example.test:9000/v1"
+            os.environ["VLLM_VALIDATOR_MAX_TOKENS"] = "999"
+            os.environ["LANGGRAPH_CHECKPOINT_DB_PATH"] = "./runtime-checkpoints.sqlite"
+
+            cfg = config_module.Config(config_module.EnvironmentSettings())
+
+            self.assertEqual(cfg.VLLM_CHAT_BASE_URL, "http://example.test:9000/v1")
+            self.assertEqual(cfg.LANGGRAPH_CHECKPOINT_DB_PATH, "./runtime-checkpoints.sqlite")
+            self.assertEqual(
+                cfg.VLLM_VALIDATOR_MAX_TOKENS,
+                config_module.InternalConfigDefaults.VLLM_VALIDATOR_MAX_TOKENS,
+            )
+        finally:
+            if original_chat_base_url is None:
+                os.environ.pop("VLLM_CHAT_BASE_URL", None)
+            else:
+                os.environ["VLLM_CHAT_BASE_URL"] = original_chat_base_url
+
+            if original_validator_tokens is None:
+                os.environ.pop("VLLM_VALIDATOR_MAX_TOKENS", None)
+            else:
+                os.environ["VLLM_VALIDATOR_MAX_TOKENS"] = original_validator_tokens
+
+            if original_checkpoint_path is None:
+                os.environ.pop("LANGGRAPH_CHECKPOINT_DB_PATH", None)
+            else:
+                os.environ["LANGGRAPH_CHECKPOINT_DB_PATH"] = original_checkpoint_path
+
     def test_input_image_guardrail_routes_system_error_to_end(self):
         agent = importlib.import_module("src.llm_pipeline.agent")
 
@@ -381,6 +506,37 @@ class PipelineRuntimeTests(unittest.TestCase):
         self.assertIn("Remove only the specifically requested detail", prompt)
         self.assertIn("Do not add replacement decorations", prompt)
 
+    def test_customization_context_uses_configured_rag_top_k(self):
+        synthesizer = importlib.import_module("src.llm_pipeline.nodes.synthesizer")
+        config = importlib.import_module("src.llm_pipeline.core.config").config
+
+        seen = {}
+        original_top_k = config.CUSTOMIZATION_RAG_TOP_K
+        original_retrieve = synthesizer.retrieve_rules_for_query
+
+        try:
+            config.CUSTOMIZATION_RAG_TOP_K = 7
+
+            def fake_retrieve(query, top_k=None):
+                seen["query"] = query
+                seen["top_k"] = top_k
+                return "mock rules"
+
+            synthesizer.retrieve_rules_for_query = fake_retrieve
+            synthesizer._build_customization_context(
+                {
+                    "customization_prompt": "add a blue sapphire",
+                    "synthesized_prompt": "white gold ring, centered product photo",
+                    "user_prompt": "add a blue sapphire",
+                }
+            )
+        finally:
+            config.CUSTOMIZATION_RAG_TOP_K = original_top_k
+            synthesizer.retrieve_rules_for_query = original_retrieve
+
+        self.assertEqual(seen["top_k"], 7)
+        self.assertIn("blue sapphire", seen["query"])
+
     def test_validate_base_image_preserves_generation_system_error_message(self):
         validator = importlib.import_module("src.llm_pipeline.nodes.validator")
 
@@ -404,6 +560,7 @@ class PipelineRuntimeTests(unittest.TestCase):
 
         class FakeResponse:
             content = b"fake-image"
+            headers = {}
 
             def raise_for_status(self):
                 return None
@@ -421,6 +578,41 @@ class PipelineRuntimeTests(unittest.TestCase):
             validator.requests.get = original_get
 
         self.assertIn("/view?filename=sample_input.png&type=input", seen["url"])
+
+    def test_validator_preserves_image_mime_type_in_data_url(self):
+        validator = importlib.import_module("src.llm_pipeline.nodes.validator")
+
+        seen = {}
+
+        class FakeResponse:
+            content = b"fake-jpeg-bytes"
+            headers = {"Content-Type": "image/jpeg"}
+
+            def raise_for_status(self):
+                return None
+
+        original_get = validator.requests.get
+        original_invoke = validator.invoke_multimodal_json
+
+        try:
+            def fake_get(url, timeout=10):
+                seen["url"] = url
+                return FakeResponse()
+
+            def fake_invoke(prompt, image_data_url, max_tokens=None):
+                seen["image_data_url"] = image_data_url
+                return '{"is_valid": true, "reason": "ok"}'
+
+            validator.requests.get = fake_get
+            validator.invoke_multimodal_json = fake_invoke
+            result = validator._call_vision_judge("sample_input.jpg", "judge")
+        finally:
+            validator.requests.get = original_get
+            validator.invoke_multimodal_json = original_invoke
+
+        self.assertTrue(result["is_valid"])
+        self.assertIn("/view?filename=sample_input.jpg&type=input", seen["url"])
+        self.assertTrue(seen["image_data_url"].startswith("data:image/jpeg;base64,"))
 
     def test_multi_view_only_edit_success_skips_second_wait(self):
         agent = importlib.import_module("src.llm_pipeline.agent")
@@ -486,6 +678,50 @@ class PipelineRuntimeTests(unittest.TestCase):
 
         self.assertEqual(response.status, "failed")
         self.assertEqual(response.message, "empty outputs")
+
+    def test_follow_up_action_rejects_missing_thread(self):
+        schemas = importlib.import_module("src.llm_pipeline.core.schemas")
+        pipelines = importlib.import_module("src.llm_pipeline.pipelines")
+
+        fake_graph = FakeGraph(FakeState({}, ()))
+        original_graph = pipelines.app_graph
+        pipelines.app_graph = fake_graph
+
+        try:
+            response = pipelines.process_generation_request(
+                schemas.PipelineRequest(thread_id="missing-thread", action="accept_base")
+            )
+        finally:
+            pipelines.app_graph = original_graph
+
+        self.assertEqual(response.status, "failed")
+        self.assertIn("thread_id", response.message)
+        self.assertEqual(fake_graph.updated_state, [])
+        self.assertEqual(fake_graph.invocations, [])
+
+    def test_follow_up_action_requires_paused_waiting_state(self):
+        schemas = importlib.import_module("src.llm_pipeline.core.schemas")
+        pipelines = importlib.import_module("src.llm_pipeline.pipelines")
+
+        fake_graph = FakeGraph(FakeState({"base_ring_image_url": "base.png"}, ()))
+        original_graph = pipelines.app_graph
+        pipelines.app_graph = fake_graph
+
+        try:
+            response = pipelines.process_generation_request(
+                schemas.PipelineRequest(
+                    thread_id="completed-thread",
+                    action="request_customization",
+                    customization_prompt="add engraving",
+                )
+            )
+        finally:
+            pipelines.app_graph = original_graph
+
+        self.assertEqual(response.status, "failed")
+        self.assertIn("사용자 입력을 기다리는 상태", response.message)
+        self.assertEqual(fake_graph.updated_state, [])
+        self.assertEqual(fake_graph.invocations, [])
 
     def test_synthesizer_bridges_output_view_url_into_input_filename(self):
         synthesizer = importlib.import_module("src.llm_pipeline.nodes.synthesizer")
