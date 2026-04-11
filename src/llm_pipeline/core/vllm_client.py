@@ -8,6 +8,14 @@ from .config import config
 
 logger = logging.getLogger(__name__)
 
+CHAT_BASE_URL = (config.VLLM_CHAT_BASE_URL or "").rstrip("/")
+CHAT_MODEL = config.VLLM_CHAT_MODEL
+CHAT_API_KEY = config.VLLM_CHAT_API_KEY
+
+EMBED_BASE_URL = (config.VLLM_EMBED_BASE_URL or "").rstrip("/")
+EMBED_MODEL = config.VLLM_EMBED_MODEL
+EMBED_API_KEY = config.VLLM_EMBED_API_KEY
+
 
 def _normalize_base_url(base_url: str) -> str:
     return (base_url or "").rstrip("/")
@@ -22,11 +30,11 @@ def _get_openai_client(base_url: str, api_key: str) -> OpenAI:
 
 
 def _chat_client() -> OpenAI:
-    return _get_openai_client(config.VLLM_CHAT_BASE_URL, config.VLLM_CHAT_API_KEY)
+    return _get_openai_client(CHAT_BASE_URL, CHAT_API_KEY)
 
 
 def _embed_client() -> OpenAI:
-    return _get_openai_client(config.VLLM_EMBED_BASE_URL, config.VLLM_EMBED_API_KEY)
+    return _get_openai_client(EMBED_BASE_URL, EMBED_API_KEY)
 
 
 def _extract_text_content(message_content) -> str:
@@ -47,7 +55,7 @@ def _extract_text_content(message_content) -> str:
 
 def invoke_text_prompt(prompt: str, temperature: float = 0.3, max_tokens: Optional[int] = None) -> str:
     response = _chat_client().chat.completions.create(
-        model=config.VLLM_CHAT_MODEL,
+        model=CHAT_MODEL,
         messages=[{"role": "user", "content": prompt}],
         temperature=temperature,
         max_tokens=max_tokens or config.VLLM_PROMPT_MAX_TOKENS,
@@ -57,7 +65,7 @@ def invoke_text_prompt(prompt: str, temperature: float = 0.3, max_tokens: Option
 
 def invoke_multimodal_json(prompt: str, image_data_url: str, max_tokens: Optional[int] = None) -> str:
     response = _chat_client().chat.completions.create(
-        model=config.VLLM_CHAT_MODEL,
+        model=CHAT_MODEL,
         messages=[
             {
                 "role": "user",
@@ -80,9 +88,9 @@ class VLLMEmbeddingFunction:
         base_url: Optional[str] = None,
         api_key: Optional[str] = None,
     ):
-        self.model = model or config.VLLM_EMBED_MODEL
-        self.base_url = _normalize_base_url(base_url or config.VLLM_EMBED_BASE_URL)
-        self.api_key = api_key or config.VLLM_EMBED_API_KEY
+        self.model = model or EMBED_MODEL
+        self.base_url = _normalize_base_url(base_url or EMBED_BASE_URL)
+        self.api_key = api_key or EMBED_API_KEY
 
     def _client(self) -> OpenAI:
         return _get_openai_client(self.base_url, self.api_key)
