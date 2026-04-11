@@ -5,8 +5,8 @@ loguru>=0.7.0
 
 # Langchain & LangGraph Orchestration
 langchain-core>=0.1.0
-langgraph>=0.0.26
-langgraph-checkpoint-sqlite
+langgraph>=1.1.6,<2.0.0
+langgraph-checkpoint-sqlite>=3.0.3,<4.0.0
 openai>=1.30.0
 
 # 3D Pipeline Vector RAG (Lightweight search)

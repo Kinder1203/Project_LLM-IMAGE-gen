@@ -1,6 +1,6 @@
 # 반지 커스텀 다각도 3D 생성용 LLM 백엔드
 
-LangGraph, `vLLM`, ComfyUI, Vision 검수를 조합해 반지 시안 생성부터 커스텀 수정, 다각도 추출까지 오케스트레이션하는 졸업작품용 LLM 백엔드입니다. 현재 기준 도메인은 `반지`이며, 추론은 `Gemma4 26B` 계열 멀티모달 모델과 별도 임베딩 모델을 `vLLM OpenAI-compatible endpoint`로 서빙하는 구성을 기준으로 합니다.
+LangGraph, `vLLM`, ComfyUI, Vision 검수를 조합해 반지 시안 생성부터 커스텀 수정, 다각도 추출까지 오케스트레이션하는 졸업작품용 LLM 백엔드입니다. 현재 기준 도메인은 `반지`이며, 추론은 `Gemma 4 E4B` 멀티모달 모델과 별도 임베딩 모델을 `vLLM OpenAI-compatible endpoint`로 서빙하는 구성을 기준으로 합니다.
 
 ## 프로젝트 개요
 - `text`: 텍스트만 받아 베이스 반지를 생성하고, 사용자 승인 후 다각도 이미지를 만듭니다.
@@ -27,9 +27,9 @@ pip install -r requirements.txt
 
 ```env
 VLLM_CHAT_BASE_URL=http://127.0.0.1:8000/v1
-VLLM_CHAT_MODEL=gemma4-26b
+VLLM_CHAT_MODEL=gemma4-e4b
 VLLM_CHAT_API_KEY=EMPTY
-VLLM_EMBED_BASE_URL=http://127.0.0.1:8001/v1
+VLLM_EMBED_BASE_URL=http://127.0.0.1:8002/v1
 VLLM_EMBED_MODEL=BAAI/bge-m3
 VLLM_EMBED_API_KEY=EMPTY
 WEBHOOK_URL=https://graduation-work-backend.onrender.com/api/model-result
@@ -58,7 +58,7 @@ python -m src.llm_pipeline.scripts.db_feeder
 ```
 
 ## 실행 방법
-애플리케이션 서버나 별도 호출 코드에서는 `process_generation_request()`를 직접 사용합니다.
+애플리케이션 서버나 별도 호출 코드에서는 `process_generation_request()`를 직접 사용합니다. LangGraph 그래프와 SQLite 체크포인터는 첫 요청 시점에 lazy 초기화됩니다.
 
 ```python
 from src.llm_pipeline.core.schemas import PipelineRequest

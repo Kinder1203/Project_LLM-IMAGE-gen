@@ -5,8 +5,8 @@ from .agent import build_ring_generation_graph
 from .core.config import config
 from .core.schemas import PipelineRequest, PipelineResponse
 
-# 싱글톤 형태로 그래프 초기화
-app_graph = build_ring_generation_graph()
+# 첫 요청 시점에 그래프를 초기화해 import 부작용을 줄인다.
+app_graph = None
 WAITING_NODES = {"wait_for_user_approval", "wait_for_edit_approval"}
 
 
@@ -40,8 +40,15 @@ def _failed_response(message: str, base_image_url: str = "") -> PipelineResponse
     )
 
 
+def get_app_graph():
+    global app_graph
+    if app_graph is None:
+        app_graph = build_ring_generation_graph()
+    return app_graph
+
+
 def _validate_follow_up_thread(thread_config: dict) -> PipelineResponse | None:
-    saved_state = app_graph.get_state(thread_config)
+    saved_state = get_app_graph().get_state(thread_config)
     saved_values = saved_state.values or {}
     paused_nodes = tuple(saved_state.next or ())
 
@@ -69,25 +76,26 @@ def process_generation_request(request: PipelineRequest) -> PipelineResponse:
     logger.info(f"Action: {request.action} on Thread: {request.thread_id}")
 
     thread_config = {"configurable": {"thread_id": request.thread_id}}
+    graph = get_app_graph()
 
     try:
         if request.action == "start":
             logger.info("Invoking LangGraph with start payload.")
-            app_graph.invoke(_build_initial_state(request), config=thread_config)
+            graph.invoke(_build_initial_state(request), config=thread_config)
 
         elif request.action == "accept_base":
             invalid_follow_up = _validate_follow_up_thread(thread_config)
             if invalid_follow_up is not None:
                 return invalid_follow_up
-            app_graph.update_state(thread_config, {"intent": "approved_base_only"})
+            graph.update_state(thread_config, {"intent": "approved_base_only"})
             logger.info("Resuming LangGraph after accept_base.")
-            app_graph.invoke(None, config=thread_config)
+            graph.invoke(None, config=thread_config)
 
         elif request.action == "request_customization":
             invalid_follow_up = _validate_follow_up_thread(thread_config)
             if invalid_follow_up is not None:
                 return invalid_follow_up
-            app_graph.update_state(
+            graph.update_state(
                 thread_config,
                 {
                     "intent": "user_requested_customization",
@@ -97,10 +105,10 @@ def process_generation_request(request: PipelineRequest) -> PipelineResponse:
                 },
             )
             logger.info("Resuming LangGraph after request_customization.")
-            app_graph.invoke(None, config=thread_config)
+            graph.invoke(None, config=thread_config)
 
         logger.info("LangGraph invoke returned. Fetching current state...")
-        current_state_obj = app_graph.get_state(thread_config)
+        current_state_obj = graph.get_state(thread_config)
         final_state = current_state_obj.values
         next_nodes = current_state_obj.next
         logger.info(

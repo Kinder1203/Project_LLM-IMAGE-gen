@@ -6,11 +6,11 @@ class EnvironmentSettings(BaseSettings):
 
     # vLLM chat / multimodal inference
     VLLM_CHAT_BASE_URL: str = "http://127.0.0.1:8000/v1"
-    VLLM_CHAT_MODEL: str = "gemma4-26b"
+    VLLM_CHAT_MODEL: str = "gemma4-e4b"
     VLLM_CHAT_API_KEY: str = "EMPTY"
 
     # vLLM embedding inference
-    VLLM_EMBED_BASE_URL: str = "http://127.0.0.1:8001/v1"
+    VLLM_EMBED_BASE_URL: str = "http://127.0.0.1:8002/v1"
     VLLM_EMBED_MODEL: str = "BAAI/bge-m3"
     VLLM_EMBED_API_KEY: str = "EMPTY"
 

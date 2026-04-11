@@ -187,6 +187,33 @@ class FakeOpenAIClient:
 
 @unittest.skipUnless(HAS_RUNTIME_DEPS, "runtime dependencies are required for pipeline tests")
 class PipelineRuntimeTests(unittest.TestCase):
+    def test_pipelines_lazy_initialize_graph_on_first_use(self):
+        agent = importlib.import_module("src.llm_pipeline.agent")
+        original_builder = agent.build_ring_generation_graph
+        original_module = sys.modules.pop("src.llm_pipeline.pipelines", None)
+        seen = {"calls": 0}
+        sentinel = object()
+
+        try:
+            def fake_builder():
+                seen["calls"] += 1
+                return sentinel
+
+            agent.build_ring_generation_graph = fake_builder
+            pipelines = importlib.import_module("src.llm_pipeline.pipelines")
+
+            self.assertIsNone(pipelines.app_graph)
+            self.assertEqual(seen["calls"], 0)
+            self.assertIs(pipelines.get_app_graph(), sentinel)
+            self.assertEqual(seen["calls"], 1)
+            self.assertIs(pipelines.app_graph, sentinel)
+        finally:
+            agent.build_ring_generation_graph = original_builder
+            if original_module is None:
+                sys.modules.pop("src.llm_pipeline.pipelines", None)
+            else:
+                sys.modules["src.llm_pipeline.pipelines"] = original_module
+
     def test_vllm_multimodal_payload_uses_short_token_limit(self):
         vllm_client = importlib.import_module("src.llm_pipeline.core.vllm_client")
         config = importlib.import_module("src.llm_pipeline.core.config").config
