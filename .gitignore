@@ -8,11 +8,10 @@ __pycache__/
 .mypy_cache/
 
 data/
+.venv/
 
 input_images/*
 !input_images/.gitkeep
 
 output_images/*
 !output_images/.gitkeep
-
-.env

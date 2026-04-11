@@ -1,7 +1,7 @@
 {
   "25": {
     "inputs": {
-      "image": "ff6b58edee07fe655500dafe03af7661da5cee80ff4e3a1eaa31c03a62e2d75d.png"
+      "image": "dog.jpg"
     },
     "class_type": "LoadImage",
     "_meta": {
@@ -36,11 +36,7 @@
   },
   "36": {
     "inputs": {
-      "filename_prefix": "ComfyUI-45_right",
-      "images": [
-        "65:37:89",
-        0
-      ]
+      "filename_prefix": "ComfyUI-45_right"
     },
     "class_type": "SaveImage",
     "_meta": {
@@ -49,11 +45,7 @@
   },
   "38": {
     "inputs": {
-      "filename_prefix": "ComfyUI-90_right",
-      "images": [
-        "65:39:98",
-        0
-      ]
+      "filename_prefix": "ComfyUI-90_right"
     },
     "class_type": "SaveImage",
     "_meta": {
@@ -62,11 +54,7 @@
   },
   "41": {
     "inputs": {
-      "filename_prefix": "ComfyUI-aerial_view",
-      "images": [
-        "65:42:116",
-        0
-      ]
+      "filename_prefix": "ComfyUI-aerial_view"
     },
     "class_type": "SaveImage",
     "_meta": {
@@ -75,11 +63,7 @@
   },
   "43": {
     "inputs": {
-      "filename_prefix": "ComfyUI-low_angle",
-      "images": [
-        "65:44:125",
-        0
-      ]
+      "filename_prefix": "ComfyUI-low_angle"
     },
     "class_type": "SaveImage",
     "_meta": {
@@ -88,11 +72,7 @@
   },
   "45": {
     "inputs": {
-      "filename_prefix": "ComfyUI-45_left",
-      "images": [
-        "65:46:134",
-        0
-      ]
+      "filename_prefix": "ComfyUI-45_left"
     },
     "class_type": "SaveImage",
     "_meta": {
@@ -101,11 +81,7 @@
   },
   "47": {
     "inputs": {
-      "filename_prefix": "ComfyUI-90_left",
-      "images": [
-        "65:40:107",
-        0
-      ]
+      "filename_prefix": "ComfyUI-90_left"
     },
     "class_type": "SaveImage",
     "_meta": {
@@ -307,7 +283,7 @@
   },
   "65:35:81": {
     "inputs": {
-      "seed": 864993937066247,
+      "seed": 45681945295264,
       "steps": 4,
       "cfg": 1,
       "sampler_name": "euler",
@@ -467,7 +443,7 @@
   },
   "65:37:90": {
     "inputs": {
-      "seed": 405868421823137,
+      "seed": 533260216256557,
       "steps": 4,
       "cfg": 1,
       "sampler_name": "euler",
@@ -624,7 +600,7 @@
   },
   "65:39:99": {
     "inputs": {
-      "seed": 507933693362283,
+      "seed": 948109403114170,
       "steps": 4,
       "cfg": 1,
       "sampler_name": "euler",
@@ -781,7 +757,7 @@
   },
   "65:42:117": {
     "inputs": {
-      "seed": 757958372345700,
+      "seed": 630227671201875,
       "steps": 4,
       "cfg": 1,
       "sampler_name": "euler",
@@ -938,7 +914,7 @@
   },
   "65:44:126": {
     "inputs": {
-      "seed": 495293742630408,
+      "seed": 795156556323577,
       "steps": 4,
       "cfg": 1,
       "sampler_name": "euler",
@@ -1143,7 +1119,7 @@
   },
   "65:46:138": {
     "inputs": {
-      "seed": 941061162245235,
+      "seed": 380663712992037,
       "steps": 4,
       "cfg": 1,
       "sampler_name": "euler",
@@ -1252,7 +1228,7 @@
   },
   "65:40:108": {
     "inputs": {
-      "seed": 202646758175812,
+      "seed": 931408746917836,
       "steps": 4,
       "cfg": 1,
       "sampler_name": "euler",
@@ -1409,7 +1385,7 @@
   },
   "65:33:21": {
     "inputs": {
-      "seed": 1106429432136498,
+      "seed": 1013633382744774,
       "steps": 4,
       "cfg": 1,
       "sampler_name": "euler",

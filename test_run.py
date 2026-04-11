@@ -69,6 +69,44 @@ def get_input_image_path() -> str:
     
     return filepath
 
+
+def review_customized_design(thread_id: str, response, download_prefix: str):
+    current_response = response
+
+    while current_response.status == "waiting_for_user_edit":
+        print("\n[휴게소 도달] 커스텀 결과 확인 대기")
+        custom_url = current_response.base_image_url
+        if custom_url:
+            download_image(custom_url, "output_images", download_prefix)
+
+        custom_choice = input(
+            "\n[시안 확인] 해당 커스텀 수정본을 수락하시겠습니까?\n"
+            "  1. 수락하고 다각도로!\n"
+            "  2. 재수정\n"
+            "번호 입력: "
+        ).strip()
+
+        if custom_choice == "2":
+            redo_prompt = input("\n[재수정 프롬프트] 어떻게 다시 바꾸고 싶으신가요?: ").strip()
+            if not redo_prompt:
+                redo_prompt = "다른 느낌으로 다시 뽑아봐"
+            print("\n유저 피드백 반영: 커스텀 재수정 요청...\n")
+            current_response = process_generation_request(
+                PipelineRequest(
+                    thread_id=thread_id,
+                    action="request_customization",
+                    customization_prompt=redo_prompt,
+                )
+            )
+            continue
+
+        print("\n[다음 단계] 현재 시안을 수락하고 다각도 진행...\n")
+        current_response = process_generation_request(
+            PipelineRequest(thread_id=thread_id, action="accept_base")
+        )
+
+    return current_response
+
 def run_interactive_demo():
     configure_demo_logging()
     # 데모 실행 중에는 외부 백엔드로 웹훅을 보내지 않는다.
@@ -118,22 +156,11 @@ def run_interactive_demo():
                     res_custom = process_generation_request(request_custom)
                     
                     if res_custom.status == "waiting_for_user_edit":
-                        print("\n[2차 휴게소 도달] 커스텀(각인 등) 시안 확인 대기")
-                        custom_url = res_custom.base_image_url
-                        if custom_url: download_image(custom_url, "output_images", "scenario1_custom_review")
-                        
-                        custom_choice = input("\n[2차 확인] 커스텀이 잘 되었습니다.\n  1. 완벽해 다각도 가자!\n  2. 맘에 안들어 한번 더 다시해!\n번호 입력: ")
-                        if custom_choice.strip() == "2":
-                            redo_prompt = input("\n[재수정 프롬프트] 어떻게 다시 바꾸고 싶으신가요?: ").strip()
-                            if not redo_prompt:
-                                redo_prompt = "아까 요청한거 다 지우고 심플하게 바꿔"
-                            print("\n유저 변심: 커스텀 재수정 요청. (재가동)...\n")
-                            res_final = process_generation_request(
-                                PipelineRequest(thread_id=thread_id, action="request_customization", customization_prompt=redo_prompt)
-                            )
-                        else:
-                            print("\n[Step 3] 최종 커스텀 시안 수락. 다각도 진행...\n")
-                            res_final = process_generation_request(PipelineRequest(thread_id=thread_id, action="accept_base"))
+                        res_final = review_customized_design(
+                            thread_id=thread_id,
+                            response=res_custom,
+                            download_prefix="scenario1_custom_review",
+                        )
                     else:
                         res_final = res_custom
                 else:
@@ -169,20 +196,11 @@ def run_interactive_demo():
             res = process_generation_request(request)
             
             if res.status == "waiting_for_user_edit":
-                print("\n[휴게소 도달] 이미지 기반 커스텀 결과 대기")
-                custom_url = res.base_image_url
-                if custom_url: download_image(custom_url, "output_images", "scenario2_custom_review")
-                
-                custom_choice = input("\n[시안 확인] 해당 커스텀 수정본을 수락하시겠습니까?\n  1. 수락하고 다각도로!\n  2. 재수정\n번호 입력: ")
-                if custom_choice.strip() == "2":
-                    redo_prompt = input("\n[재수정 프롬프트] 어떻게 다시 바꾸고 싶으신가요?: ").strip()
-                    if not redo_prompt:
-                        redo_prompt = "다른 느낌으로 다시 뽑아봐"
-                    res_final = process_generation_request(
-                        PipelineRequest(thread_id=thread_id, action="request_customization", customization_prompt=redo_prompt)
-                    )
-                else:
-                    res_final = process_generation_request(PipelineRequest(thread_id=thread_id, action="accept_base"))
+                res_final = review_customized_design(
+                    thread_id=thread_id,
+                    response=res,
+                    download_prefix="scenario2_custom_review",
+                )
             else:
                 res_final = res
 

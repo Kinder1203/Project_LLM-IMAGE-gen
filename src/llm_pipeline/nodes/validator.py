@@ -1,6 +1,7 @@
 import base64
 import json
 import logging
+import re
 from io import BytesIO
 from urllib.parse import quote
 
@@ -61,6 +62,30 @@ def _handle_validation_error(reason: str) -> dict:
     return _validation_result(False, reason, result_type="system_error")
 
 
+def _parse_json_object(raw_content: object) -> dict:
+    text = str(raw_content or "").strip()
+    if not text:
+        raise ValueError("Vision response was empty.")
+
+    fenced_match = re.match(r"^```(?:json)?\s*(.*?)\s*```$", text, flags=re.IGNORECASE | re.DOTALL)
+    if fenced_match:
+        text = fenced_match.group(1).strip()
+
+    try:
+        parsed = json.loads(text)
+    except json.JSONDecodeError:
+        start = text.find("{")
+        end = text.rfind("}")
+        if start == -1 or end == -1 or start >= end:
+            raise
+        parsed = json.loads(text[start : end + 1])
+
+    if not isinstance(parsed, dict):
+        raise ValueError("Vision response JSON must be an object.")
+
+    return parsed
+
+
 def _detect_image_mime_type(image_bytes: bytes, response_content_type: str = "") -> str:
     normalized = (response_content_type or "").split(";")[0].strip().lower()
     if normalized.startswith("image/"):
@@ -108,7 +133,7 @@ def _call_vision_judge(image_url: str, prompt: str) -> dict:
         )
 
         logger.info(f"Vision raw response: {_truncate_for_log(str(raw_content))}")
-        parsed = json.loads(str(raw_content).strip())
+        parsed = _parse_json_object(raw_content)
         result = _validation_result(bool(parsed.get("is_valid", False)), parsed.get("reason", "검수 이유 없음"))
         logger.info(f"Vision parsed result: {result}")
         return result

@@ -29,6 +29,7 @@ class InternalConfigDefaults:
     # the primary environment contract.
     VLLM_VALIDATOR_MAX_TOKENS = 120
     VLLM_PROMPT_MAX_TOKENS = 256
+    VLLM_PROMPT_TEMPERATURE = 0.2
     WEBHOOK_TIMEOUT_SECONDS = 5
     COMFYUI_HISTORY_TIMEOUT_SECONDS = 300
     COMFYUI_REQUEST_TIMEOUT_SECONDS = 10
@@ -50,7 +51,7 @@ class InternalConfigDefaults:
     EDIT_VALIDATION_MAX_RETRIES = 3
     REMBG_VALIDATION_MAX_RETRIES = 3
     RAG_DEFAULT_TOP_K = 3
-    CUSTOMIZATION_RAG_TOP_K = 6
+    CUSTOMIZATION_RAG_TOP_K = 4
 
 
 class Config:
@@ -75,6 +76,7 @@ class Config:
         # Code-backed defaults
         self.VLLM_VALIDATOR_MAX_TOKENS = InternalConfigDefaults.VLLM_VALIDATOR_MAX_TOKENS
         self.VLLM_PROMPT_MAX_TOKENS = InternalConfigDefaults.VLLM_PROMPT_MAX_TOKENS
+        self.VLLM_PROMPT_TEMPERATURE = InternalConfigDefaults.VLLM_PROMPT_TEMPERATURE
         self.WEBHOOK_TIMEOUT_SECONDS = InternalConfigDefaults.WEBHOOK_TIMEOUT_SECONDS
         self.COMFYUI_HISTORY_TIMEOUT_SECONDS = InternalConfigDefaults.COMFYUI_HISTORY_TIMEOUT_SECONDS
         self.COMFYUI_REQUEST_TIMEOUT_SECONDS = InternalConfigDefaults.COMFYUI_REQUEST_TIMEOUT_SECONDS

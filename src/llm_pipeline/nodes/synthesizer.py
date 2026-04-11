@@ -1,8 +1,10 @@
+import copy
 import json
 import logging
 import random
 import re
 import time
+from functools import lru_cache
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlencode, urlparse
 from typing import Optional
@@ -117,25 +119,32 @@ def _sync_call_comfyui(payload: dict) -> dict:
 
             if prompt_id in hist_data:
                 image_urls: list[str] = []
+                output_image_urls: list[str] = []
                 outputs = hist_data[prompt_id].get("outputs", {})
 
                 for out_data in outputs.values():
                     for img in out_data.get("images", []):
+                        image_type = img.get("type", "output")
                         query = urlencode(
                             {
                                 "filename": img["filename"],
                                 "subfolder": img.get("subfolder", ""),
-                                "type": img.get("type", "output"),
+                                "type": image_type,
                             }
                         )
-                        image_urls.append(f"{COMFY_URL}/view?{query}")
+                        image_url = f"{COMFY_URL}/view?{query}"
+                        image_urls.append(image_url)
+                        if image_type == "output":
+                            output_image_urls.append(image_url)
 
-                if not image_urls:
+                selected_urls = output_image_urls or image_urls
+
+                if not selected_urls:
                     error_message = "ComfyUI completed the workflow but returned no image outputs in /history."
                     logger.error(error_message)
                     return _comfy_result(error_message=error_message)
 
-                return _comfy_result(image_urls=image_urls)
+                return _comfy_result(image_urls=selected_urls)
 
             time.sleep(config.COMFYUI_POLL_INTERVAL_SECONDS)
 
@@ -157,9 +166,14 @@ def _sync_call_comfyui(payload: dict) -> dict:
         return _comfy_result(error_message=error_message)
 
 
-def _load_workflow_template(template_path: Path) -> dict:
-    with template_path.open("r", encoding="utf-8") as file:
+@lru_cache(maxsize=8)
+def _load_workflow_template_cached(template_path: str) -> dict:
+    with Path(template_path).open("r", encoding="utf-8") as file:
         return json.load(file)
+
+
+def _load_workflow_template(template_path: Path) -> dict:
+    return copy.deepcopy(_load_workflow_template_cached(str(template_path.resolve())))
 
 
 def _infer_background_spec(text: str) -> str:
@@ -175,8 +189,51 @@ def _infer_background_spec(text: str) -> str:
     return "pure pitch-black"
 
 
+def _mentions_multi_ring_request(text: str) -> bool:
+    normalized = " ".join((text or "").lower().split())
+    tokens = (
+        "couple ring",
+        "couple rings",
+        "pair ring",
+        "ring pair",
+        "matching rings",
+        "matching ring set",
+        "ring set",
+        "bridal set",
+        "wedding band set",
+        "his and hers",
+        "커플링",
+        "커플 링",
+        "세트링",
+        "세트 링",
+        "반지 세트",
+        "한 쌍의 반지",
+    )
+    return any(token in normalized for token in tokens)
+
+
+def _single_ring_subject_guidance(text: str) -> str:
+    if not _mentions_multi_ring_request(text):
+        return ""
+    return (
+        "If the user asks for couple rings, a ring set, or multiple coordinated rings, "
+        "render exactly one representative hero ring only. "
+        "Do not show a pair, a second ring, or multiple rings in the same frame. "
+        "Preserve the shared material, finish, and key design language in that single representative ring. "
+    )
+
+
 def _enforce_background_contrast(prompt: str, source_text: str) -> str:
     background_spec = _infer_background_spec(source_text)
+    subject_enforcement = ()
+    if _mentions_multi_ring_request(source_text):
+        subject_enforcement = (
+            "exactly one representative hero ring only",
+            "single ring only, not a pair or set",
+            "no second ring",
+            "no multiple rings in frame",
+        )
+
     enforced = _dedupe_prompt_segments(
         prompt,
         config.TRELLIS_REQUIRED_PROMPT,
@@ -187,16 +244,30 @@ def _enforce_background_contrast(prompt: str, source_text: str) -> str:
         "background color must strongly contrast with the ring material",
         "clearly visible empty inner hole",
         "clean contour edges",
+        "sharp focus",
+        "ring fully visible",
+        "not cropped",
+        "not occluded",
         "no gradient",
         "no texture",
         "no props",
+        "no stand",
+        "no pedestal",
+        "no fabric",
         "no hands",
         "no fingers",
         "no jewelry box",
         "no table",
         "no extra jewelry",
+        "no text",
+        "no watermark",
+        "no logo",
+        "no mirror reflection",
+        "no floor reflection",
         "no background reflections",
+        "no cast shadow",
         "no cast objects",
+        *subject_enforcement,
     )
     return " ".join(enforced.split())
 
@@ -235,7 +306,11 @@ def _detect_customization_kind(custom_prompt: str) -> str:
     lower = (custom_prompt or "").lower()
     if any(token in lower for token in ("각인", "engrave", "engraving", "문구", "텍스트", "lettering", "이니셜")):
         return "engraving"
-    if any(token in lower for token in ("큐빅", "보석", "gem", "diamond", "stone", "스톤")):
+    if any(token in lower for token in (
+        "큐빅", "보석", "gem", "diamond", "stone", "스톤",
+        "sapphire", "ruby", "emerald", "opal", "pearl",
+        "사파이어", "루비", "에메랄드", "오팔", "진주", "다이아",
+    )):
         return "gemstone"
     return "general"
 
@@ -269,8 +344,11 @@ def _compose_edit_prompt(state: AgentState, rag_context: str, customization_kind
         f"{base_descriptor}"
         "Use the provided input ring image as the authoritative source. "
         "Keep the same ring identity, same composition, same camera angle, same crop, same scale, "
+        "same number of visible rings, same arrangement between rings, "
         "same lighting direction, same material, same reflections, and same background unless the user explicitly requests a change. "
         "Do not redesign the whole ring. Do not generate a different ring. "
+        "Do not introduce extra rings, props, stands, pedestals, fabrics, jewelry boxes, hands, fingers, text, watermark, logos, mirror reflections, floor reflections, or cast shadows. "
+        "Keep the ring fully visible, unobstructed, and free from new background clutter. "
         "Make only the minimum local change needed for the requested edit. "
     )
 
@@ -500,7 +578,9 @@ def generate_base_image(state: AgentState) -> dict:
     user_prompt = state.get("user_prompt", "")
     rag_context = state.get("rag_context", "")
     contrast_source = f"{user_prompt} {rag_context}".strip()
-    background_spec = _infer_background_spec(contrast_source)
+    background_spec = _infer_background_spec(user_prompt)
+    subject_guidance = _single_ring_subject_guidance(user_prompt)
+    subject_guidance_block = f"7. {subject_guidance}\n" if subject_guidance else ""
 
     logger.info("Enhancing prompt using vLLM chat model & RAG rules...")
 
@@ -516,13 +596,13 @@ Your task:
 4. Keep the ring as the only subject, centered, isolated, and suitable for rembg/TRELLIS extraction.
 5. Avoid props, hands, fingers, boxes, tables, texture, gradient, scenery, and extra jewelry.
 6. Output only one line of comma-separated keywords, optimized for image generation. Include the exact background color explicitly.
-No conversational text and no quotes.
+{subject_guidance_block}No conversational text and no quotes.
 """
 
     try:
         enhanced_prompt = invoke_text_prompt(
             prompt=sys_prompt,
-            temperature=0.3,
+            temperature=config.VLLM_PROMPT_TEMPERATURE,
             max_tokens=config.VLLM_PROMPT_MAX_TOKENS,
         )
     except Exception as exc:
@@ -536,7 +616,7 @@ No conversational text and no quotes.
             "single centered ring product photo",
         )
 
-    enhanced_prompt = _enforce_background_contrast(enhanced_prompt, contrast_source)
+    enhanced_prompt = _enforce_background_contrast(enhanced_prompt, user_prompt)
     logger.info(f"vLLM enhanced prompt: {enhanced_prompt}")
 
     try:

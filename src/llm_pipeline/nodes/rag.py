@@ -1,26 +1,38 @@
 import logging
 import os
+from functools import lru_cache
+
 from langchain_chroma import Chroma
-from ..core.schemas import AgentState
+
 from ..core.config import config
+from ..core.schemas import AgentState
 from ..core.vllm_client import VLLMEmbeddingFunction
 
 logger = logging.getLogger(__name__)
 
-# 단일 구조의 RAG 검색기 (유사도 검색 특화)
+
+def _format_context_piece(page_content: str, category: str) -> str:
+    normalized_content = (page_content or "").strip()
+    prefix = f"[{category}]"
+    if normalized_content.startswith(prefix):
+        return normalized_content
+    return f"{prefix} {normalized_content}".strip()
+
+
 class RingVectorRAG:
-    """
-    Chroma를 활용하여 사용자 질문에 맞는 Gemma 통제 가이드 및 반지 전문 지식을 찾아옴.
-    """
-    def __init__(self):
-        self.embeddings = VLLMEmbeddingFunction(model=config.VLLM_EMBED_MODEL)
-        
+    """Chroma를 활용하여 사용자 질문에 맞는 Gemma 통제 가이드 및 반지 전문 지식을 찾아온다."""
+
+    def __init__(self, vector_db_path: str | None = None, embed_model: str | None = None):
+        self.vector_db_path = vector_db_path or config.VECTOR_DB_PATH
+        self.embed_model = embed_model or config.VLLM_EMBED_MODEL
+        self.embeddings = VLLMEmbeddingFunction(model=self.embed_model)
+
         # db_feeder.py가 먼저 실행되었다는 가정 하에 로드
-        if os.path.exists(config.VECTOR_DB_PATH):
+        if os.path.exists(self.vector_db_path):
             self.vector_store = Chroma(
                 collection_name="ring_gemma_rules",
                 embedding_function=self.embeddings,
-                persist_directory=config.VECTOR_DB_PATH
+                persist_directory=self.vector_db_path,
             )
         else:
             self.vector_store = None
@@ -30,41 +42,43 @@ class RingVectorRAG:
         """가장 연관성이 높은 반지 소재 지식이나 프롬프트 팁을 문자열로 반환"""
         if not self.vector_store:
             return "No specific instructions found. Follow standard jewelry prompting."
-            
+
         logger.info(f"RingVectorRAG searching for exact logic matching: '{query}'")
-        
+
         try:
-            # 단순 Vector Similarity Search 수행
             search_top_k = top_k if top_k is not None else config.RAG_DEFAULT_TOP_K
             results = self.vector_store.similarity_search(query, k=search_top_k)
-            
+
             context_parts = []
             for doc in results:
                 cat = doc.metadata.get("category", "General")
-                context_parts.append(f"[{cat}] {doc.page_content}")
-                
+                context_parts.append(_format_context_piece(doc.page_content, cat))
+
             return "\n\n".join(context_parts)
-        except Exception as e:
-            logger.error(f"Vector search failed: {e}")
+        except Exception as exc:
+            logger.error(f"Vector search failed: {exc}")
             return "Failure during context retrieval."
+
+
+@lru_cache(maxsize=4)
+def _get_rag_engine(vector_db_path: str, embed_model: str) -> RingVectorRAG:
+    return RingVectorRAG(vector_db_path=vector_db_path, embed_model=embed_model)
 
 
 def retrieve_rules_for_query(query: str, top_k: int | None = None) -> str:
     if not query.strip():
         return "No specific instructions found. Follow standard jewelry prompting."
-    rag_engine = RingVectorRAG()
+    rag_engine = _get_rag_engine(config.VECTOR_DB_PATH, config.VLLM_EMBED_MODEL)
     return rag_engine.search_ring_rules(query, top_k=top_k)
 
-# 노드 래퍼 함수 (State 반영용)
+
 def retrieve_ring_context(state: AgentState) -> dict:
-    """
-    (Step 2 - Text Branch) RingVectorRAG를 이용해 커플링 디자인용 맥락 확보.
-    """
+    """(Step 2 - Text Branch) RingVectorRAG를 이용해 커플링 디자인용 맥락 확보."""
     prompt = state.get("user_prompt", "")
     logger.info("Executing Lightweight Vector RAG for Generative Rules...")
-    
-    rag_engine = RingVectorRAG()
+
+    rag_engine = _get_rag_engine(config.VECTOR_DB_PATH, config.VLLM_EMBED_MODEL)
     real_context = rag_engine.search_ring_rules(prompt, top_k=config.RAG_DEFAULT_TOP_K)
-    
+
     logger.info(f"Retrieved 3D Control Rules Length: {len(real_context)}")
     return {"rag_context": real_context}

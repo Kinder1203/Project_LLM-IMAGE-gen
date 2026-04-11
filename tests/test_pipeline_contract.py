@@ -513,6 +513,67 @@ class PipelineRuntimeTests(unittest.TestCase):
         self.assertIn("background color must strongly contrast with the ring material", prompt)
         self.assertIn("clearly visible empty inner hole", prompt)
         self.assertIn("single centered ring product photo", prompt)
+        self.assertIn("no cast shadow", prompt)
+        self.assertIn("no watermark", prompt)
+        self.assertIn("ring fully visible", prompt)
+
+    def test_synthesizer_normalizes_couple_ring_requests_to_one_representative_ring(self):
+        synthesizer = importlib.import_module("src.llm_pipeline.nodes.synthesizer")
+
+        prompt = synthesizer._enforce_background_contrast(
+            "18k white gold couple ring, simple product photography",
+            "18k 화이트골드 커플링, 심플한 제품 사진",
+        )
+
+        self.assertIn("exactly one representative hero ring only", prompt)
+        self.assertIn("single ring only, not a pair or set", prompt)
+        self.assertIn("no second ring", prompt)
+
+    def test_synthesizer_template_loader_returns_fresh_copy_even_when_cached(self):
+        synthesizer = importlib.import_module("src.llm_pipeline.nodes.synthesizer")
+
+        first = synthesizer._load_workflow_template(synthesizer.BASE_TEMPLATE_PATH)
+        first["__test_mutation__"] = True
+
+        second = synthesizer._load_workflow_template(synthesizer.BASE_TEMPLATE_PATH)
+
+        self.assertNotIn("__test_mutation__", second)
+
+    def test_generate_base_image_uses_configured_prompt_temperature(self):
+        synthesizer = importlib.import_module("src.llm_pipeline.nodes.synthesizer")
+        config = importlib.import_module("src.llm_pipeline.core.config").config
+
+        seen = {}
+        original_prompt_temperature = config.VLLM_PROMPT_TEMPERATURE
+        original_invoke = synthesizer.invoke_text_prompt
+        original_build_payload = synthesizer._build_base_payload
+        original_sync_call = synthesizer._sync_call_comfyui
+        original_safe_ref = synthesizer._safe_chainable_image_ref
+
+        try:
+            config.VLLM_PROMPT_TEMPERATURE = 0.17
+
+            def fake_invoke_text_prompt(prompt, temperature=0.0, max_tokens=None):
+                seen["temperature"] = temperature
+                seen["max_tokens"] = max_tokens
+                return "white gold ring, pure pitch-black background"
+
+            synthesizer.invoke_text_prompt = fake_invoke_text_prompt
+            synthesizer._build_base_payload = lambda enhanced_prompt: {"prompt": {"enhanced_prompt": enhanced_prompt}}
+            synthesizer._sync_call_comfyui = lambda payload: {"image_urls": ["http://example.com/base.png"], "error_message": ""}
+            synthesizer._safe_chainable_image_ref = lambda image_ref: image_ref
+
+            result = synthesizer.generate_base_image({"user_prompt": "simple white gold ring", "rag_context": ""})
+        finally:
+            config.VLLM_PROMPT_TEMPERATURE = original_prompt_temperature
+            synthesizer.invoke_text_prompt = original_invoke
+            synthesizer._build_base_payload = original_build_payload
+            synthesizer._sync_call_comfyui = original_sync_call
+            synthesizer._safe_chainable_image_ref = original_safe_ref
+
+        self.assertEqual(seen["temperature"], 0.17)
+        self.assertEqual(seen["max_tokens"], config.VLLM_PROMPT_MAX_TOKENS)
+        self.assertEqual(result["generation_result"], "success")
 
     def test_edit_prompt_preserves_source_and_localizes_removal(self):
         synthesizer = importlib.import_module("src.llm_pipeline.nodes.synthesizer")
@@ -530,8 +591,46 @@ class PipelineRuntimeTests(unittest.TestCase):
 
         self.assertIn("Use the provided input ring image as the authoritative source.", prompt)
         self.assertIn("Keep the same ring identity, same composition, same camera angle, same crop", prompt)
+        self.assertIn("same number of visible rings, same arrangement between rings", prompt)
+        self.assertIn("Do not introduce extra rings, props, stands, pedestals", prompt)
+        self.assertIn("Keep the ring fully visible, unobstructed", prompt)
         self.assertIn("Remove only the specifically requested detail", prompt)
         self.assertIn("Do not add replacement decorations", prompt)
+
+    def test_detect_customization_kind_recognizes_common_gemstone_names(self):
+        synthesizer = importlib.import_module("src.llm_pipeline.nodes.synthesizer")
+
+        self.assertEqual(synthesizer._detect_customization_kind("반지 중앙에 작은 사파이어 추가"), "gemstone")
+        self.assertEqual(synthesizer._detect_customization_kind("가운데 다이아를 제거해줘"), "gemstone")
+
+    def test_generate_base_image_uses_user_prompt_for_background_inference(self):
+        synthesizer = importlib.import_module("src.llm_pipeline.nodes.synthesizer")
+
+        original_invoke = synthesizer.invoke_text_prompt
+        original_build_payload = synthesizer._build_base_payload
+        original_sync_call = synthesizer._sync_call_comfyui
+        original_safe_ref = synthesizer._safe_chainable_image_ref
+
+        try:
+            synthesizer.invoke_text_prompt = lambda prompt, temperature=0.0, max_tokens=None: "minimalist matte black titanium ring, studio product photo"
+            synthesizer._build_base_payload = lambda enhanced_prompt: {"prompt": {"enhanced_prompt": enhanced_prompt}}
+            synthesizer._sync_call_comfyui = lambda payload: {"image_urls": ["http://example.com/base.png"], "error_message": ""}
+            synthesizer._safe_chainable_image_ref = lambda image_ref: image_ref
+
+            result = synthesizer.generate_base_image(
+                {
+                    "user_prompt": "블랙 티타늄 소재의 미니멀한 무광 반지",
+                    "rag_context": "[Ring_Material] White Metals and Contrast: use a dark background.",
+                }
+            )
+        finally:
+            synthesizer.invoke_text_prompt = original_invoke
+            synthesizer._build_base_payload = original_build_payload
+            synthesizer._sync_call_comfyui = original_sync_call
+            synthesizer._safe_chainable_image_ref = original_safe_ref
+
+        self.assertIn("single flat pure icy white studio background", result["synthesized_prompt"])
+        self.assertNotIn("single flat pure pitch-black studio background", result["synthesized_prompt"])
 
     def test_customization_context_uses_configured_rag_top_k(self):
         synthesizer = importlib.import_module("src.llm_pipeline.nodes.synthesizer")
@@ -640,6 +739,46 @@ class PipelineRuntimeTests(unittest.TestCase):
         self.assertTrue(result["is_valid"])
         self.assertIn("/view?filename=sample_input.jpg&type=input", seen["url"])
         self.assertTrue(seen["image_data_url"].startswith("data:image/jpeg;base64,"))
+
+    def test_validator_accepts_fenced_json_response(self):
+        validator = importlib.import_module("src.llm_pipeline.nodes.validator")
+
+        class FakeResponse:
+            content = b"fake-png-bytes"
+            headers = {"Content-Type": "image/png"}
+
+            def raise_for_status(self):
+                return None
+
+        original_get = validator.requests.get
+        original_invoke = validator.invoke_multimodal_json
+
+        try:
+            def fake_get(url, timeout=10):
+                return FakeResponse()
+
+            def fake_invoke(prompt, image_data_url, max_tokens=None):
+                return '```json\n{"is_valid": true, "reason": "ok"}\n```'
+
+            validator.requests.get = fake_get
+            validator.invoke_multimodal_json = fake_invoke
+            result = validator._call_vision_judge("sample_input.png", "judge")
+        finally:
+            validator.requests.get = original_get
+            validator.invoke_multimodal_json = original_invoke
+
+        self.assertTrue(result["is_valid"])
+        self.assertEqual(result["reason"], "ok")
+
+    def test_parse_json_object_extracts_embedded_json_block(self):
+        validator = importlib.import_module("src.llm_pipeline.nodes.validator")
+
+        parsed = validator._parse_json_object(
+            "Here is the result:\n```json\n{\"is_valid\": false, \"reason\": \"bad\"}\n```\nThanks."
+        )
+
+        self.assertFalse(parsed["is_valid"])
+        self.assertEqual(parsed["reason"], "bad")
 
     def test_multi_view_only_edit_success_skips_second_wait(self):
         agent = importlib.import_module("src.llm_pipeline.agent")
@@ -794,6 +933,133 @@ class PipelineRuntimeTests(unittest.TestCase):
         self.assertEqual(bridged, "bridged_input.png")
         self.assertIn("/upload/image", seen["upload_url"])
         self.assertEqual(seen["upload_name"], "ComfyUI_00003_.png")
+
+    def test_sync_call_comfyui_prefers_output_images_over_temp(self):
+        synthesizer = importlib.import_module("src.llm_pipeline.nodes.synthesizer")
+
+        class FakePostResponse:
+            def raise_for_status(self):
+                return None
+
+            def json(self):
+                return {"prompt_id": "prompt-123"}
+
+        class FakeGetResponse:
+            def __init__(self, payload):
+                self._payload = payload
+
+            def raise_for_status(self):
+                return None
+
+            def json(self):
+                return self._payload
+
+        original_post = synthesizer.requests.post
+        original_get = synthesizer.requests.get
+        original_sleep = synthesizer.time.sleep
+
+        history_payload = {
+            "prompt-123": {
+                "outputs": {
+                    "preview": {
+                        "images": [
+                            {"filename": "temp_preview.png", "subfolder": "", "type": "temp"}
+                        ]
+                    },
+                    "save": {
+                        "images": [
+                            {"filename": "final_output.png", "subfolder": "", "type": "output"}
+                        ]
+                    },
+                }
+            }
+        }
+
+        try:
+            synthesizer.requests.post = lambda *args, **kwargs: FakePostResponse()
+            synthesizer.requests.get = lambda *args, **kwargs: FakeGetResponse(history_payload)
+            synthesizer.time.sleep = lambda *_args, **_kwargs: None
+            result = synthesizer._sync_call_comfyui({"prompt": {"1": {}}})
+        finally:
+            synthesizer.requests.post = original_post
+            synthesizer.requests.get = original_get
+            synthesizer.time.sleep = original_sleep
+
+        self.assertEqual(
+            result["image_urls"],
+            [f"{synthesizer.COMFY_URL}/view?filename=final_output.png&subfolder=&type=output"],
+        )
+
+    def test_rag_does_not_duplicate_category_prefix_in_context(self):
+        rag = importlib.import_module("src.llm_pipeline.nodes.rag")
+
+        class FakeDoc:
+            def __init__(self, page_content, metadata):
+                self.page_content = page_content
+                self.metadata = metadata
+
+        class FakeChroma:
+            def __init__(self, collection_name, embedding_function, persist_directory):
+                pass
+
+            def similarity_search(self, query, k=3):
+                return [
+                    FakeDoc(
+                        "[Ring_Customization] Preserve Existing Structure on Edit: keep geometry stable.",
+                        {"category": "Ring_Customization"},
+                    )
+                ]
+
+        original_chroma = rag.Chroma
+        original_exists = rag.os.path.exists
+
+        try:
+            rag._get_rag_engine.cache_clear()
+            rag.Chroma = FakeChroma
+            rag.os.path.exists = lambda path: True
+            context = rag.retrieve_rules_for_query("add a gem", top_k=1)
+        finally:
+            rag.Chroma = original_chroma
+            rag.os.path.exists = original_exists
+            rag._get_rag_engine.cache_clear()
+
+        self.assertEqual(
+            context,
+            "[Ring_Customization] Preserve Existing Structure on Edit: keep geometry stable.",
+        )
+
+    def test_rag_reuses_cached_engine_for_same_config(self):
+        rag = importlib.import_module("src.llm_pipeline.nodes.rag")
+        config = importlib.import_module("src.llm_pipeline.core.config").config
+
+        seen = {"init_calls": 0, "queries": []}
+        original_factory = rag.RingVectorRAG
+
+        class FakeRagEngine:
+            def __init__(self, vector_db_path=None, embed_model=None):
+                seen["init_calls"] += 1
+                seen["vector_db_path"] = vector_db_path
+                seen["embed_model"] = embed_model
+
+            def search_ring_rules(self, query, top_k=None):
+                seen["queries"].append((query, top_k))
+                return f"context:{query}:{top_k}"
+
+        try:
+            rag._get_rag_engine.cache_clear()
+            rag.RingVectorRAG = FakeRagEngine
+
+            first = rag.retrieve_rules_for_query("add a gem", top_k=1)
+            second = rag.retrieve_rules_for_query("add engraving", top_k=2)
+        finally:
+            rag.RingVectorRAG = original_factory
+            rag._get_rag_engine.cache_clear()
+
+        self.assertEqual(seen["init_calls"], 1)
+        self.assertEqual(seen["vector_db_path"], config.VECTOR_DB_PATH)
+        self.assertEqual(seen["embed_model"], config.VLLM_EMBED_MODEL)
+        self.assertEqual(first, "context:add a gem:1")
+        self.assertEqual(second, "context:add engraving:2")
 
 
 @unittest.skipUnless(HAS_DB_DEPS, "db feeder dependencies are required for feeder tests")
