@@ -17,6 +17,10 @@ HAS_DB_DEPS = all(
     importlib.util.find_spec(module_name) is not None
     for module_name in ("pydantic", "langchain_chroma", "openai")
 )
+HAS_API_DEPS = all(
+    importlib.util.find_spec(module_name) is not None
+    for module_name in ("pydantic", "fastapi", "httpx")
+)
 
 
 def _template_path(filename: str) -> Path:
@@ -196,6 +200,65 @@ class FakeOpenAIClient:
             completions=FakeChatCompletions(chat_sink if chat_sink is not None else {}, chat_content)
         )
         self.embeddings = FakeEmbeddingsApi(embed_sink if embed_sink is not None else {})
+
+
+@unittest.skipUnless(HAS_API_DEPS, "FastAPI dependencies are required for API wrapper tests")
+class ApiWrapperTests(unittest.TestCase):
+    def test_healthz_returns_runtime_metadata(self):
+        from fastapi.testclient import TestClient
+
+        app_module = importlib.import_module("server.app")
+        client = TestClient(app_module.app)
+
+        response = client.get("/healthz")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["status"], "ok")
+        self.assertEqual(payload["service"], "ring-llm-pipeline")
+        self.assertIn("chat_model", payload)
+        self.assertIn("embed_model", payload)
+        self.assertIn("checkpoint_path", payload)
+
+    def test_pipeline_endpoint_proxies_process_generation_request(self):
+        from fastapi.testclient import TestClient
+
+        api_module = importlib.import_module("server.api")
+        app_module = importlib.import_module("server.app")
+        schemas = importlib.import_module("src.llm_pipeline.core.schemas")
+        original_handler = api_module.process_generation_request
+        seen = {}
+
+        def fake_handler(request):
+            seen["request"] = request
+            return schemas.PipelineResponse(
+                status="waiting_for_user",
+                optimized_image_urls=[],
+                message="review base image",
+                base_image_url="base.png",
+            )
+
+        try:
+            api_module.process_generation_request = fake_handler
+            client = TestClient(app_module.app)
+            response = client.post(
+                "/pipeline",
+                json={
+                    "thread_id": "api-thread",
+                    "action": "start",
+                    "prompt": "slim platinum ring",
+                },
+            )
+        finally:
+            api_module.process_generation_request = original_handler
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["status"], "waiting_for_user")
+        self.assertEqual(payload["base_image_url"], "base.png")
+        self.assertIsInstance(seen["request"], schemas.PipelineRequest)
+        self.assertEqual(seen["request"].thread_id, "api-thread")
+        self.assertEqual(seen["request"].input_type, "text")
 
 
 @unittest.skipUnless(HAS_RUNTIME_DEPS, "runtime dependencies are required for pipeline tests")

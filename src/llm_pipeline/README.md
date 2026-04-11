@@ -11,6 +11,8 @@
 - `nodes/`: 라우팅, RAG, ComfyUI 생성, Vision 검수를 수행합니다.
 - `scripts/`: DB 적재 같은 보조 운영 스크립트를 둡니다.
 
+HTTP wrapper는 패키지 밖 [server/app.py](</c:/Users/user/Desktop/project/server/app.py:1>) / [server/api.py](</c:/Users/user/Desktop/project/server/api.py:1>)에서 관리합니다.
+
 ## 추론 백엔드 전제
 - 채팅·비전 추론은 `VLLM_CHAT_*` 설정을 사용하는 `vLLM` 인스턴스 1개를 기준으로 합니다.
 - 임베딩은 `VLLM_EMBED_*` 설정을 사용하는 별도 `vLLM` 인스턴스 1개를 기준으로 합니다.

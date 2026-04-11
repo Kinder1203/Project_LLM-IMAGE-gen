@@ -91,6 +91,14 @@ python test_run.py
 
 `thread_id`는 모든 요청에서 반드시 명시해야 합니다. 특히 `accept_base`와 `request_customization` 같은 후속 액션은 최초 `start`와 동일한 `thread_id`를 그대로 사용해야 합니다.
 
+백엔드 연동용으로는 FastAPI wrapper도 제공합니다.
+
+```bash
+uvicorn server.app:app --host 0.0.0.0 --port 8080
+```
+
+HTTP 엔드포인트와 요청/응답 예시는 [server/api_spec.md](</c:/Users/user/Desktop/project/server/api_spec.md:1>)를 기준으로 봅니다.
+
 ## 검증
 문서 계약과 런타임 핵심 가정은 아래 계약 테스트로 빠르게 확인할 수 있습니다.
 
@@ -108,6 +116,7 @@ python -m unittest tests.test_pipeline_contract
 |-- requirements.txt
 |-- test_run.py
 |-- comfyui_workflow/
+|-- server/
 |-- tests/
 |-- input_images/
 |-- output_images/
@@ -125,6 +134,7 @@ python -m unittest tests.test_pipeline_contract
 
 ## 문서 맵
 - `README.md`: 사람용 프로젝트 개요, 설치, 실행, 폴더 구조
+- `server/api_spec.md`: 백엔드 연동용 HTTP 엔드포인트 명세
 - `AGENTS.md`: Codex 작업 원칙, 우선순위, 테스트, 출력 형식
 - `src/llm_pipeline/README.md`: 파이프라인 계약의 단일 기준 문서
 - `src/llm_pipeline/scripts/README.md`: `db_feeder.py` 운영 메모
