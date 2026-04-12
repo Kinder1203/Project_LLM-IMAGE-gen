@@ -19,7 +19,7 @@ from .rag import retrieve_rules_for_query
 logger = logging.getLogger(__name__)
 
 COMFY_URL = config.COMFYUI_URL.rstrip("/")
-REPO_ROOT = Path(__file__).resolve().parents[3]
+REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 def _resolve_template_path(*candidates: str) -> Path:
@@ -49,9 +49,9 @@ def _resolve_template_path(*candidates: str) -> Path:
     )
 
 
-BASE_TEMPLATE_PATH = _resolve_template_path("image_z_image_turbo (2).json")
+BASE_TEMPLATE_PATH = _resolve_template_path("image_z_image_turbo.json")
 EDIT_TEMPLATE_PATH = _resolve_template_path("image_qwen_image_edit_2509.json")
-MULTI_VIEW_TEMPLATE_PATH = _resolve_template_path("templates-1_click_multiple_character_angles-v1.0 (3) (1).json")
+MULTI_VIEW_TEMPLATE_PATH = _resolve_template_path("templates-1_click_multiple_character_angles-v1.0.json")
 
 
 def _truncate_text(text: str, max_len: int = 400) -> str:
@@ -308,24 +308,71 @@ def _build_base_retry_directive(user_prompt: str, validation_reason: str, retry_
         directives.extend(
             [
                 f"single flat {background_spec} studio background",
-                "background must be the direct opposite color family of the ring material",
+                "background must keep the ring silhouette and inner hole clearly separated",
+                "avoid similar background colors that blend into the ring material",
                 "floating isolated jewelry product photo",
-                "no support surface anywhere in frame",
-                "no visible ground plane",
-                "no tabletop",
-                "no pedestal",
-                "no studio sweep curve",
-                "no gradient",
-                "no texture",
-                "no mirror reflection",
-                "no floor reflection",
-                "no cast shadow",
-                "no contact shadow",
-                "no ambient shadow under the ring",
+                "avoid visible support surfaces or ground planes",
+                "avoid tables, pedestals, and studio sweep backdrops",
+                "avoid gradients and textured backgrounds",
+                "avoid heavy cast shadows",
+                "avoid heavy contact shadows",
+                "avoid strong floor reflections",
             ]
         )
 
     return _dedupe_prompt_segments(*directives)
+
+
+_EDIT_NEGATIVE_COMMON = (
+    "text",
+    "watermark",
+    "logo",
+    "extra jewelry",
+    "hands",
+    "fingers",
+    "jewelry box",
+    "table",
+    "pedestal",
+    "heavy cast shadow",
+    "heavy contact shadow",
+    "strong floor reflection",
+    "background clutter",
+    "cropped ring",
+    "occluded ring",
+)
+
+_EDIT_NEGATIVE_BY_KIND = {
+    "engraving": (
+        "floating text",
+        "sticker text",
+        "printed text",
+        "overlay text",
+        "extra letters",
+        "malformed engraving",
+    ),
+    "gemstone": (
+        "floating gemstone",
+        "pasted gemstone",
+        "extra stones",
+        "disconnected stone",
+        "wrong placement",
+    ),
+}
+
+_MULTI_ANGLE_NEGATIVE = (
+    "props",
+    "table",
+    "pedestal",
+    "ground plane",
+    "heavy shadow",
+    "strong reflection",
+    "extra jewelry",
+    "cropped ring",
+    "occlusion",
+    "text",
+    "watermark",
+    "logo",
+)
 
 
 _ENGRAVING_CANDIDATE_PATTERN = r"[A-Za-z0-9가-힣&+\-_/]+(?:\s+[A-Za-z0-9가-힣&+\-_/]+){0,2}"
@@ -496,14 +543,14 @@ def _enforce_background_contrast(prompt: str, source_text: str) -> str:
         "no watermark",
         "no logo",
         "no mirror reflection",
-        "no floor reflection",
-        "no glossy floor",
-        "no reflected surface",
-        "no background reflections",
-        "no cast shadow",
-        "no contact shadow",
-        "no drop shadow",
-        "no ambient shadow under the ring",
+        "avoid strong floor reflection",
+        "avoid glossy floor",
+        "avoid reflected surfaces",
+        "avoid distracting background reflections",
+        "avoid heavy cast shadow",
+        "avoid heavy contact shadow",
+        "avoid strong drop shadow",
+        "avoid heavy ambient shadow under the ring",
         "no cast objects",
         *_subject_prompt_terms(source_text),
     )
@@ -543,6 +590,17 @@ def _build_customization_context(state: AgentState) -> tuple[str, str, str]:
     return rag_context, customization_kind, engraving_text
 
 
+def _build_edit_negative_prompt(customization_kind: str) -> str:
+    return _dedupe_prompt_segments(
+        *_EDIT_NEGATIVE_COMMON,
+        *_EDIT_NEGATIVE_BY_KIND.get(customization_kind, ()),
+    )
+
+
+def _build_multi_angle_negative_prompt() -> str:
+    return _dedupe_prompt_segments(*_MULTI_ANGLE_NEGATIVE)
+
+
 def _compose_edit_prompt(state: AgentState, rag_context: str, customization_kind: str, engraving_text: str) -> str:
     custom_prompt = (state.get("customization_prompt") or state.get("user_prompt", "")).strip()
     base_prompt = (state.get("synthesized_prompt") or "").strip()
@@ -569,9 +627,9 @@ def _compose_edit_prompt(state: AgentState, rag_context: str, customization_kind
         "Keep the same ring identity, same composition, same camera angle, same crop, same scale, "
         "same number of visible rings, same arrangement between rings, "
         "same lighting direction, same material, same reflections, and same background unless the user explicitly requests a change. "
-        "Keep the background perfectly flat with no visible ground plane, no tabletop horizon, no cast shadow, no contact shadow, and no floor reflection unless the user explicitly asks otherwise. "
+        "Keep the background perfectly flat with no visible ground plane or tabletop horizon, and avoid heavy cast shadows, heavy contact shadows, and strong floor reflections unless the user explicitly asks otherwise. "
         "Do not redesign the whole ring. Do not generate a different ring. "
-        "Do not introduce extra rings, props, stands, pedestals, fabrics, jewelry boxes, hands, fingers, text, watermark, logos, mirror reflections, floor reflections, cast shadows, contact shadows, or glossy surfaces. "
+        "Do not introduce extra rings, props, stands, pedestals, fabrics, jewelry boxes, hands, fingers, text, watermark, logos, or obvious background clutter. "
         "Keep the ring fully visible, unobstructed, and free from new background clutter. "
         "Make only the minimum local change needed for the requested edit. "
     )
@@ -741,11 +799,88 @@ def _collect_load_image_nodes(workflow: dict) -> list[tuple[str, dict]]:
     ]
 
 
-def _select_edit_load_image_node(workflow: dict) -> tuple[str, dict]:
-    load_nodes = _collect_load_image_nodes(workflow)
-    if len(load_nodes) == 1:
-        return load_nodes[0]
-    raise ValueError(f"Edit workflow requires exactly one LoadImage node, found {len(load_nodes)}.")
+def _node_reference_id(reference: object) -> str:
+    if isinstance(reference, list) and reference and isinstance(reference[0], str):
+        return reference[0]
+    return ""
+
+
+def _resolve_upstream_load_image_node(
+    workflow: dict,
+    reference: object,
+    visited: Optional[set[str]] = None,
+) -> tuple[str, dict] | None:
+    node_id = _node_reference_id(reference)
+    if not node_id:
+        return None
+
+    if visited is None:
+        visited = set()
+    if node_id in visited:
+        return None
+    visited.add(node_id)
+
+    node = workflow.get(node_id)
+    if not isinstance(node, dict):
+        return None
+    if node.get("class_type") == "LoadImage":
+        return node_id, node
+
+    inputs = node.get("inputs")
+    if not isinstance(inputs, dict):
+        return None
+
+    for value in inputs.values():
+        resolved = _resolve_upstream_load_image_node(workflow, value, visited)
+        if resolved is not None:
+            return resolved
+
+    return None
+
+
+def _find_edit_prompt_node_id(workflow: dict) -> str:
+    fallback_node_ids: list[str] = []
+    for node_id, node in workflow.items():
+        if not isinstance(node, dict) or node.get("class_type") != "PrimitiveStringMultiline":
+            continue
+        fallback_node_ids.append(node_id)
+        value = ((node.get("inputs") or {}).get("value") or "")
+        if isinstance(value, str) and "___CUSTOM_PROMPT___" in value:
+            return node_id
+    if len(fallback_node_ids) == 1:
+        return fallback_node_ids[0]
+    raise ValueError("Edit workflow is missing an identifiable prompt node for the positive encoder.")
+
+
+def _select_edit_load_image_nodes(workflow: dict) -> dict[str, tuple[str, dict]]:
+    prompt_node_id = _find_edit_prompt_node_id(workflow)
+    positive_encoders = [
+        (node_id, node)
+        for node_id, node in workflow.items()
+        if isinstance(node, dict)
+        and node.get("class_type") == "TextEncodeQwenImageEditPlus"
+        and _node_reference_id((node.get("inputs") or {}).get("prompt")) == prompt_node_id
+    ]
+
+    if len(positive_encoders) != 1:
+        raise ValueError(
+            f"Edit workflow requires exactly one positive TextEncodeQwenImageEditPlus node, found {len(positive_encoders)}."
+        )
+
+    _, positive_node = positive_encoders[0]
+    inputs = positive_node.get("inputs") or {}
+    image1_node = _resolve_upstream_load_image_node(workflow, inputs.get("image1"))
+    image2_node = _resolve_upstream_load_image_node(workflow, inputs.get("image2"))
+    image3_node = _resolve_upstream_load_image_node(workflow, inputs.get("image3"))
+
+    if not image1_node or not image2_node or not image3_node:
+        raise ValueError("Edit workflow must expose resolvable LoadImage nodes for image1, image2, and image3.")
+
+    return {
+        "image1": image1_node,
+        "image2": image2_node,
+        "image3": image3_node,
+    }
 
 
 def _select_multi_view_load_image_node(workflow: dict) -> tuple[str, dict]:
@@ -772,6 +907,12 @@ def _set_load_image_value(node: dict, image_value: str) -> None:
     inputs["image"] = image_value
 
 
+def _resolve_optional_edit_reference(base_image: str, reference_image: str) -> str:
+    if reference_image:
+        return _normalize_comfy_image_reference(reference_image)
+    return _normalize_comfy_image_reference(base_image)
+
+
 def _build_base_payload(enhanced_prompt: str) -> dict:
     workflow = _load_workflow_template(BASE_TEMPLATE_PATH)
     workflow = _require_api_prompt_template(workflow, BASE_TEMPLATE_PATH.name)
@@ -783,12 +924,29 @@ def _build_base_payload(enhanced_prompt: str) -> dict:
     }
 
 
-def _build_edit_payload(base_image: str, custom_prompt: str) -> dict:
+def _build_edit_payload(
+    base_image: str,
+    custom_prompt: str,
+    custom_negative_prompt: str,
+    engraving_reference_image: str = "",
+    gemstone_reference_image: str = "",
+) -> dict:
     workflow = _load_workflow_template(EDIT_TEMPLATE_PATH)
     workflow = _require_api_prompt_template(workflow, EDIT_TEMPLATE_PATH.name)
-    workflow = _replace_placeholders(workflow, {"___CUSTOM_PROMPT___": custom_prompt})
-    _, load_node = _select_edit_load_image_node(workflow)
-    _set_load_image_value(load_node, _normalize_comfy_image_reference(base_image))
+    workflow = _replace_placeholders(
+        workflow,
+        {
+            "___CUSTOM_PROMPT___": custom_prompt,
+            "___CUSTOM_NEGATIVE_PROMPT___": custom_negative_prompt,
+        },
+    )
+    load_nodes = _select_edit_load_image_nodes(workflow)
+    primary_image = _normalize_comfy_image_reference(base_image)
+    engraving_image = _resolve_optional_edit_reference(primary_image, engraving_reference_image)
+    gemstone_image = _resolve_optional_edit_reference(primary_image, gemstone_reference_image)
+    _set_load_image_value(load_nodes["image1"][1], primary_image)
+    _set_load_image_value(load_nodes["image2"][1], engraving_image)
+    _set_load_image_value(load_nodes["image3"][1], gemstone_image)
     workflow = _randomize_seeds(workflow)
     return {
         "client_id": "llm_backend",
@@ -796,9 +954,13 @@ def _build_edit_payload(base_image: str, custom_prompt: str) -> dict:
     }
 
 
-def _build_multi_view_payload(target_image: str) -> dict:
+def _build_multi_view_payload(target_image: str, negative_prompt: str) -> dict:
     workflow = _load_workflow_template(MULTI_VIEW_TEMPLATE_PATH)
     workflow = _require_api_prompt_template(workflow, MULTI_VIEW_TEMPLATE_PATH.name)
+    workflow = _replace_placeholders(
+        workflow,
+        {"__MULTI_ANGLE_NEGATIVE_PROMPT__": negative_prompt},
+    )
     _, load_node = _select_multi_view_load_image_node(workflow)
     _set_load_image_value(load_node, _normalize_comfy_image_reference(target_image))
     workflow = _randomize_seeds(workflow)
@@ -850,7 +1012,7 @@ Your task:
 2. Choose a background that strongly contrasts with the dominant ring material and keeps the outer silhouette and inner hole clearly separated.
 3. The background must be exactly one flat studio color. For this request, prefer '{background_spec}' if it fits the material guidance.
 4. {subject_instruction}
-5. Keep the background perfectly flat with no visible ground plane, tabletop, pedestal, cast shadow, contact shadow, or floor reflection.
+5. Keep the background perfectly flat with no visible ground plane, tabletop, or pedestal, and avoid heavy cast shadows, heavy contact shadows, or strong floor reflections.
 6. Avoid props, hands, fingers, boxes, tables, texture, gradient, scenery, and unrelated extra jewelry beyond the requested set.
 7. Output only one line of comma-separated keywords, optimized for image generation. Include the exact background color explicitly.
 8. {subject_guidance}
@@ -874,8 +1036,8 @@ No conversational text and no quotes.
             "clearly visible empty inner hole",
             "background must remain perfectly uniform behind and beneath the subject",
             "no visible ground plane",
-            "no contact shadow",
-            "no floor reflection",
+            "avoid heavy contact shadow",
+            "avoid strong floor reflection",
             retry_directive,
             *_subject_prompt_terms(user_prompt),
         )
@@ -924,6 +1086,9 @@ def edit_image(state: AgentState) -> dict:
     )
     rag_context, customization_kind, engraving_text = _build_customization_context(state)
     custom_prompt = _compose_edit_prompt(state, rag_context, customization_kind, engraving_text)
+    custom_negative_prompt = _build_edit_negative_prompt(customization_kind)
+    engraving_reference_image = state.get("engraving_reference_image_url", "")
+    gemstone_reference_image = state.get("gemstone_reference_image_url", "")
 
     logger.info(f"Applying customization to image: {base_image}...")
 
@@ -941,7 +1106,13 @@ def edit_image(state: AgentState) -> dict:
         }
 
     try:
-        comfyui_payload = _build_edit_payload(base_image, custom_prompt)
+        comfyui_payload = _build_edit_payload(
+            base_image=base_image,
+            custom_prompt=custom_prompt,
+            custom_negative_prompt=custom_negative_prompt,
+            engraving_reference_image=engraving_reference_image,
+            gemstone_reference_image=gemstone_reference_image,
+        )
     except Exception as exc:
         error_message = f"커스텀 편집용 ComfyUI payload 구성에 실패했습니다. ({exc})"
         logger.error(error_message)
@@ -983,6 +1154,7 @@ def generate_multi_view(state: AgentState) -> dict:
         or state.get("edited_ring_image_url", "")
         or state.get("base_ring_image_url", "")
     )
+    multi_angle_negative_prompt = _build_multi_angle_negative_prompt()
 
     logger.info(f"Extracting multi-views and applying Birefnet rembg. Target: {target_image}")
 
@@ -995,7 +1167,7 @@ def generate_multi_view(state: AgentState) -> dict:
         }
 
     try:
-        comfyui_payload = _build_multi_view_payload(target_image)
+        comfyui_payload = _build_multi_view_payload(target_image, multi_angle_negative_prompt)
     except Exception as exc:
         error_message = f"다각도용 ComfyUI payload 구성에 실패했습니다. ({exc})"
         logger.error(error_message)

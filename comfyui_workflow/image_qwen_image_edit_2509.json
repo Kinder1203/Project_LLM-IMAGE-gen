@@ -30,6 +30,24 @@
       "title": "Prompt"
     }
   },
+  "436": {
+    "inputs": {
+      "image": "2a84be05526ac11378568dd580e1684499cd4acb86a4127e8ec496975bdc65be.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "이미지 로드"
+    }
+  },
+  "437": {
+    "inputs": {
+      "image": "2a84be05526ac11378568dd580e1684499cd4acb86a4127e8ec496975bdc65be.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "이미지 로드"
+    }
+  },
   "433:75": {
     "inputs": {
       "strength": 1,
@@ -73,27 +91,6 @@
       "title": "확산 모델 로드"
     }
   },
-  "433:110": {
-    "inputs": {
-      "prompt": "",
-      "clip": [
-        "433:38",
-        0
-      ],
-      "vae": [
-        "433:39",
-        0
-      ],
-      "image1": [
-        "433:117",
-        0
-      ]
-    },
-    "class_type": "TextEncodeQwenImageEditPlus",
-    "_meta": {
-      "title": "TextEncodeQwenImageEditPlus"
-    }
-  },
   "433:66": {
     "inputs": {
       "shift": 3,
@@ -105,30 +102,6 @@
     "class_type": "ModelSamplingAuraFlow",
     "_meta": {
       "title": "모델 샘플링 (AuraFlow)"
-    }
-  },
-  "433:111": {
-    "inputs": {
-      "prompt": [
-        "435",
-        0
-      ],
-      "clip": [
-        "433:38",
-        0
-      ],
-      "vae": [
-        "433:39",
-        0
-      ],
-      "image1": [
-        "433:117",
-        0
-      ]
-    },
-    "class_type": "TextEncodeQwenImageEditPlus",
-    "_meta": {
-      "title": "TextEncodeQwenImageEditPlus"
     }
   },
   "433:88": {
@@ -217,6 +190,67 @@
     "class_type": "KSampler",
     "_meta": {
       "title": "KSampler"
+    }
+  },
+  "433:111": {
+    "inputs": {
+      "prompt": [
+        "435",
+        0
+      ],
+      "clip": [
+        "433:38",
+        0
+      ],
+      "vae": [
+        "433:39",
+        0
+      ],
+      "image1": [
+        "433:117",
+        0
+      ],
+      "image2": [
+        "436",
+        0
+      ],
+      "image3": [
+        "437",
+        0
+      ]
+    },
+    "class_type": "TextEncodeQwenImageEditPlus",
+    "_meta": {
+      "title": "TextEncodeQwenImageEditPlus"
+    }
+  },
+  "433:110": {
+    "inputs": {
+      "prompt": "___CUSTOM_NEGATIVE_PROMPT___",
+      "clip": [
+        "433:38",
+        0
+      ],
+      "vae": [
+        "433:39",
+        0
+      ],
+      "image1": [
+        "433:117",
+        0
+      ],
+      "image2": [
+        "436",
+        0
+      ],
+      "image3": [
+        "437",
+        0
+      ]
+    },
+    "class_type": "TextEncodeQwenImageEditPlus",
+    "_meta": {
+      "title": "TextEncodeQwenImageEditPlus"
     }
   }
 }

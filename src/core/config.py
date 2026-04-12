@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -52,6 +54,10 @@ class InternalConfigDefaults:
     REMBG_VALIDATION_MAX_RETRIES = 3
     RAG_DEFAULT_TOP_K = 3
     CUSTOMIZATION_RAG_TOP_K = 4
+    VECTOR_DB_PRIMARY_COLLECTION_NAME = "ring_gemma_rules"
+    VECTOR_DB_STAGING_COLLECTION_NAME = "ring_gemma_rules_staging"
+    VECTOR_DB_BACKUP_COLLECTION_NAME = "ring_gemma_rules_backup"
+    VECTOR_DB_COLLECTION_POINTER_FILENAME = "active_collection.txt"
 
 
 class Config:
@@ -91,6 +97,12 @@ class Config:
         self.REMBG_VALIDATION_MAX_RETRIES = InternalConfigDefaults.REMBG_VALIDATION_MAX_RETRIES
         self.RAG_DEFAULT_TOP_K = InternalConfigDefaults.RAG_DEFAULT_TOP_K
         self.CUSTOMIZATION_RAG_TOP_K = InternalConfigDefaults.CUSTOMIZATION_RAG_TOP_K
+        self.VECTOR_DB_PRIMARY_COLLECTION_NAME = InternalConfigDefaults.VECTOR_DB_PRIMARY_COLLECTION_NAME
+        self.VECTOR_DB_STAGING_COLLECTION_NAME = InternalConfigDefaults.VECTOR_DB_STAGING_COLLECTION_NAME
+        self.VECTOR_DB_BACKUP_COLLECTION_NAME = InternalConfigDefaults.VECTOR_DB_BACKUP_COLLECTION_NAME
+        self.VECTOR_DB_COLLECTION_POINTER_PATH = str(
+            Path(self.VECTOR_DB_PATH) / InternalConfigDefaults.VECTOR_DB_COLLECTION_POINTER_FILENAME
+        )
 
 
 config = Config()

@@ -15,19 +15,19 @@ from ..core.vllm_client import invoke_multimodal_json
 logger = logging.getLogger(__name__)
 
 _BACKGROUND_CONTRAST_POLICY = (
-    "The background must be a single solid color that is clearly complementary or otherwise "
-    "strongly contrasting to the ring's dominant material color for clean alpha matting and "
-    "inner-hole separation. Reject white/platinum/silver rings on white or light gray, "
-    "yellow/rose gold rings on beige, cream, peach, or warm gold backgrounds, and black or "
-    "gunmetal rings on black or charcoal backgrounds. Prefer black/charcoal/navy for white "
-    "metals, cool blue/cyan/teal for yellow or rose gold, and pale icy gray or white for dark "
-    "metals."
+    "The ring must remain clearly separated from the background for clean alpha matting and "
+    "inner-hole separation. Prefer a simple, mostly uniform studio background that does not blend "
+    "into the ring material. Reject images where the ring and background are too similar to keep "
+    "the outer silhouette or inner hole readable, such as white/platinum/silver rings on white or "
+    "light gray, yellow or rose gold rings on beige/cream/peach, and black or gunmetal rings on "
+    "black or charcoal backgrounds."
 )
 
 _BASE_SURFACE_REJECTION_POLICY = (
-    "Reject the image if there is any visible ground plane, support surface, tabletop, pedestal, "
-    "studio sweep curve, textured floor, gradient backdrop, floor reflection, cast shadow, "
-    "contact shadow, drop shadow, or ambient shadow directly beneath the ring."
+    "Allow subtle natural shading or a faint reflection only if the ring silhouette and inner hole "
+    "remain clearly separated. Reject the image if severe shadows, strong reflections, background "
+    "bleed/transparency, or an obvious support surface materially harm cutout quality or distract "
+    "from the ring."
 )
 
 
@@ -187,8 +187,9 @@ def validate_base_image(state: AgentState) -> dict:
         f"Generated prompt hint: '{synthesized_prompt}'. "
         f"{_BACKGROUND_CONTRAST_POLICY} "
         f"{_BASE_SURFACE_REJECTION_POLICY} "
-        "Confirm the ring silhouette and inner hole are clearly separated from the background, "
-        "the requested ring count and user-specified details are preserved, and the ring itself is high quality. "
+        "Confirm the ring silhouette and inner hole are clearly separated from the background. "
+        "Allow mild shadow or reflection if separation is still clean. "
+        "Fail the image if severe shadow/reflection/transparency hurts separation, or if the requested ring count or key user-specified details are clearly wrong. "
         "If the image is invalid, explain the dominant corrective changes succinctly so the next retry can fix them. "
         "Return JSON {'is_valid': true/false, 'reason': '...'}."
     )
@@ -229,7 +230,7 @@ def validate_edited_image(state: AgentState) -> dict:
 
     if customization_kind == "engraving" and expected_engraving_text:
         sys_prompt = (
-            "You are a strict jewelry engraving judge. "
+            "You are a jewelry engraving judge. "
             f"The ring must contain only the exact engraving text '{expected_engraving_text}'. "
             "Fail the image if any extra letters, request words, filler text, or malformed text appear. "
             "Fail the image if the text looks printed, floating, pasted, or drawn on top instead of carved into the metal. "
@@ -237,15 +238,17 @@ def validate_edited_image(state: AgentState) -> dict:
             "and look physically integrated into the band. "
             f"User request: '{custom_prompt}'. "
             f"Edit guidance used: '{customization_context}'. "
+            "Allow mild shadow or reflection if the ring remains clearly readable and the edit is integrated. "
             "Return JSON {'is_valid': true/false, 'reason': '...'}."
         )
     else:
         sys_prompt = (
-            "You are a strict jewelry edit judge. "
+            "You are a jewelry edit judge. "
             f"User request: '{custom_prompt}'. "
             f"Edit guidance used: '{customization_context}'. "
-            "Confirm that the requested modification is applied cleanly and looks physically integrated into the ring. "
-            "Fail the image if the new detail looks pasted on, floating, or visually disconnected from the ring surface. "
+            "Prioritize whether the requested modification is applied cleanly and looks physically integrated into the ring. "
+            "Allow mild shadow or reflection if the ring remains clearly readable. "
+            "Fail the image if the new detail looks pasted on, floating, visually disconnected, or if severe shadow/reflection/background bleed harms readability. "
             "Return JSON {'is_valid': true/false, 'reason': '...'}."
         )
 
@@ -330,7 +333,7 @@ def validate_input_image(state: AgentState) -> dict:
     sys_prompt = (
         "You are a pre-processing judge. Check the image. "
         f"{_BACKGROUND_CONTRAST_POLICY} "
-        "If it's too similar (for example white ring on white background), output "
+        "If the ring is not sufficiently separated from the background (for example white ring on white background), output "
         "is_valid=false, and in 'reason', write exactly a short directive for an "
         "inpainting model to fix it, like 'Change the background to solid pitch black'. "
         "Return JSON {'is_valid': true/false, 'reason': '...'}."

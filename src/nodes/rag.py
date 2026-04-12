@@ -6,6 +6,7 @@ from langchain_chroma import Chroma
 
 from ..core.config import config
 from ..core.schemas import AgentState
+from ..core.vector_db_runtime import resolve_active_collection_name
 from ..core.vllm_client import VLLMEmbeddingFunction
 
 logger = logging.getLogger(__name__)
@@ -22,15 +23,21 @@ def _format_context_piece(page_content: str, category: str) -> str:
 class RingVectorRAG:
     """Chroma를 활용하여 사용자 질문에 맞는 Gemma 통제 가이드 및 반지 전문 지식을 찾아온다."""
 
-    def __init__(self, vector_db_path: str | None = None, embed_model: str | None = None):
+    def __init__(
+        self,
+        vector_db_path: str | None = None,
+        embed_model: str | None = None,
+        collection_name: str | None = None,
+    ):
         self.vector_db_path = vector_db_path or config.VECTOR_DB_PATH
         self.embed_model = embed_model or config.VLLM_EMBED_MODEL
+        self.collection_name = collection_name or resolve_active_collection_name()
         self.embeddings = VLLMEmbeddingFunction(model=self.embed_model)
 
         # db_feeder.py가 먼저 실행되었다는 가정 하에 로드
         if os.path.exists(self.vector_db_path):
             self.vector_store = Chroma(
-                collection_name="ring_gemma_rules",
+                collection_name=self.collection_name,
                 embedding_function=self.embeddings,
                 persist_directory=self.vector_db_path,
             )
@@ -60,15 +67,20 @@ class RingVectorRAG:
             return "Failure during context retrieval."
 
 
-@lru_cache(maxsize=4)
-def _get_rag_engine(vector_db_path: str, embed_model: str) -> RingVectorRAG:
-    return RingVectorRAG(vector_db_path=vector_db_path, embed_model=embed_model)
+@lru_cache(maxsize=8)
+def _get_rag_engine(vector_db_path: str, embed_model: str, collection_name: str) -> RingVectorRAG:
+    return RingVectorRAG(
+        vector_db_path=vector_db_path,
+        embed_model=embed_model,
+        collection_name=collection_name,
+    )
 
 
 def retrieve_rules_for_query(query: str, top_k: int | None = None) -> str:
     if not query.strip():
         return "No specific instructions found. Follow standard jewelry prompting."
-    rag_engine = _get_rag_engine(config.VECTOR_DB_PATH, config.VLLM_EMBED_MODEL)
+    collection_name = resolve_active_collection_name()
+    rag_engine = _get_rag_engine(config.VECTOR_DB_PATH, config.VLLM_EMBED_MODEL, collection_name)
     return rag_engine.search_ring_rules(query, top_k=top_k)
 
 
@@ -77,7 +89,8 @@ def retrieve_ring_context(state: AgentState) -> dict:
     prompt = state.get("user_prompt", "")
     logger.info("Executing Lightweight Vector RAG for Generative Rules...")
 
-    rag_engine = _get_rag_engine(config.VECTOR_DB_PATH, config.VLLM_EMBED_MODEL)
+    collection_name = resolve_active_collection_name()
+    rag_engine = _get_rag_engine(config.VECTOR_DB_PATH, config.VLLM_EMBED_MODEL, collection_name)
     real_context = rag_engine.search_ring_rules(prompt, top_k=config.RAG_DEFAULT_TOP_K)
 
     logger.info(f"Retrieved 3D Control Rules Length: {len(real_context)}")

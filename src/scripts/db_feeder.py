@@ -3,9 +3,13 @@ from pathlib import Path
 from loguru import logger
 
 from ..core.config import config
+from ..core.vector_db_runtime import (
+    inactive_collection_name,
+    resolve_active_collection_name,
+    write_active_collection_name,
+)
 from ..core.vllm_client import VLLMEmbeddingFunction
 
-COLLECTION_NAME = "ring_gemma_rules"
 EMBEDDING_MODEL = "BAAI/bge-m3"
 
 CURATED_RULES = [
@@ -362,12 +366,12 @@ CURATED_RULES = [
 ]
 
 
-def _build_vector_store(persist_directory: str):
+def _build_vector_store(persist_directory: str, collection_name: str | None = None):
     from langchain_chroma import Chroma
 
     embedder = VLLMEmbeddingFunction(model=config.VLLM_EMBED_MODEL or EMBEDDING_MODEL)
     return Chroma(
-        collection_name=COLLECTION_NAME,
+        collection_name=collection_name or config.VECTOR_DB_PRIMARY_COLLECTION_NAME,
         embedding_function=embedder,
         persist_directory=persist_directory,
     )
@@ -393,35 +397,114 @@ def _build_documents() -> tuple[list[str], list[str], list[dict]]:
     return ids, texts, metadatas
 
 
+def _collection_snapshot(vector_store) -> dict[str, list]:
+    snapshot = vector_store.get(include=["documents", "metadatas"])
+    return {
+        "ids": list(snapshot.get("ids") or []),
+        "documents": list(snapshot.get("documents") or []),
+        "metadatas": list(snapshot.get("metadatas") or []),
+    }
+
+
+def _collection_count(vector_store) -> int:
+    return len(_collection_snapshot(vector_store)["ids"])
+
+
+def _reset_collection(persist_directory: str, collection_name: str) -> None:
+    vector_store = _build_vector_store(persist_directory, collection_name=collection_name)
+    try:
+        vector_store.delete_collection()
+        logger.info(f"Reset existing '{collection_name}' collection before re-ingestion.")
+    except Exception as exc:
+        logger.debug(f"Collection reset skipped for '{collection_name}': {exc}")
+
+
+def _replace_collection_contents(persist_directory: str, collection_name: str, snapshot: dict[str, list]) -> int:
+    _reset_collection(persist_directory, collection_name)
+    target_store = _build_vector_store(persist_directory, collection_name=collection_name)
+
+    if not snapshot["ids"]:
+        return 0
+
+    target_store.add_texts(
+        texts=snapshot["documents"],
+        metadatas=snapshot["metadatas"],
+        ids=snapshot["ids"],
+    )
+    return len(snapshot["ids"])
+
+
+def _refresh_backup_collection(persist_directory: str, source_collection_name: str) -> int:
+    source_store = _build_vector_store(persist_directory, collection_name=source_collection_name)
+    source_snapshot = _collection_snapshot(source_store)
+
+    if not source_snapshot["ids"]:
+        logger.info(
+            "Current active collection is empty. Skipping backup refresh and keeping the last successful backup."
+        )
+        return 0
+
+    return _replace_collection_contents(
+        persist_directory,
+        config.VECTOR_DB_BACKUP_COLLECTION_NAME,
+        source_snapshot,
+    )
+
+
 def init_vector_db(reset_collection: bool = True):
     """
     Build the curated Chroma collection used by the ring prompt/validation pipeline.
 
-    By default the feeder refreshes the dedicated collection so repeated runs do not
-    stack duplicate documents.
+    By default the feeder writes into the inactive collection slot, verifies the
+    ingest count, refreshes the backup from the previous active slot, and only then
+    flips the active collection pointer.
     """
 
     db_path = Path(config.VECTOR_DB_PATH)
     db_path.mkdir(parents=True, exist_ok=True)
 
     logger.info(f"Initializing Chroma DB at {db_path}...")
-
-    vector_store = _build_vector_store(str(db_path))
+    current_active_collection = resolve_active_collection_name()
+    target_collection = current_active_collection
 
     if reset_collection:
-        try:
-            vector_store.delete_collection()
-            logger.info(f"Reset existing '{COLLECTION_NAME}' collection before re-ingestion.")
-        except Exception as exc:
-            logger.debug(f"Collection reset skipped: {exc}")
-        vector_store = _build_vector_store(str(db_path))
+        target_collection = inactive_collection_name(current_active_collection)
+        _reset_collection(str(db_path), target_collection)
+        logger.info(
+            "Safe refresh enabled: "
+            f"building inactive slot '{target_collection}' while keeping "
+            f"active slot '{current_active_collection}' online."
+        )
+    else:
+        logger.warning(
+            "reset_collection=False bypasses the safe slot swap and writes directly into the active collection."
+        )
+
+    vector_store = _build_vector_store(str(db_path), collection_name=target_collection)
 
     ids, texts, metadatas = _build_documents()
-    logger.debug(f"Ingesting {len(texts)} curated ring rules into Vector DB.")
+    logger.debug(f"Ingesting {len(texts)} curated ring rules into '{target_collection}'.")
     vector_store.add_texts(texts=texts, metadatas=metadatas, ids=ids)
 
+    ingested_count = _collection_count(_build_vector_store(str(db_path), collection_name=target_collection))
+    if ingested_count != len(ids):
+        raise RuntimeError(
+            f"Vector DB refresh wrote {ingested_count} documents into '{target_collection}', "
+            f"expected {len(ids)}."
+        )
+
+    if reset_collection:
+        backup_count = _refresh_backup_collection(str(db_path), current_active_collection)
+        pointer_path = write_active_collection_name(target_collection)
+        logger.info(f"Updated active collection pointer at '{pointer_path}' -> '{target_collection}'.")
+        if backup_count:
+            logger.info(
+                f"Refreshed backup collection '{config.VECTOR_DB_BACKUP_COLLECTION_NAME}' "
+                f"with {backup_count} documents from '{current_active_collection}'."
+            )
+
     logger.success(
-        f"Successfully ingested {len(texts)} curated rules into '{COLLECTION_NAME}'."
+        f"Successfully ingested {len(texts)} curated rules into '{target_collection}'."
     )
     logger.info("Ring prompt generation and validation can now retrieve richer domain guidance.")
 

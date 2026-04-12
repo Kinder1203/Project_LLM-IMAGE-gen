@@ -1,8 +1,8 @@
-from fastapi import APIRouter
+﻿from fastapi import APIRouter
 
-from src.llm_pipeline.core.config import config
-from src.llm_pipeline.core.schemas import PipelineRequest, PipelineResponse
-from src.llm_pipeline.pipelines import process_generation_request
+from src.core.config import config
+from src.core.schemas import PipelineRequest, PipelineResponse
+from src.pipelines import process_generation_request
 
 router = APIRouter()
 

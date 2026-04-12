@@ -1,8 +1,9 @@
-import importlib
+﻿import importlib
 import importlib.util
 import json
 import os
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -39,26 +40,26 @@ class ExportedTemplateContractTests(unittest.TestCase):
         project_root = Path.cwd().resolve()
         tests_dir = project_root / "tests"
         original_cwd = Path.cwd()
-        original_module = sys.modules.pop("src.llm_pipeline.nodes.synthesizer", None)
+        original_module = sys.modules.pop("src.nodes.synthesizer", None)
 
         try:
             if str(project_root) not in sys.path:
                 sys.path.insert(0, str(project_root))
             os.chdir(tests_dir)
-            synthesizer = importlib.import_module("src.llm_pipeline.nodes.synthesizer")
+            synthesizer = importlib.import_module("src.nodes.synthesizer")
         finally:
             os.chdir(original_cwd)
             if original_module is None:
-                sys.modules.pop("src.llm_pipeline.nodes.synthesizer", None)
+                sys.modules.pop("src.nodes.synthesizer", None)
             else:
-                sys.modules["src.llm_pipeline.nodes.synthesizer"] = original_module
+                sys.modules["src.nodes.synthesizer"] = original_module
 
         self.assertTrue(synthesizer.BASE_TEMPLATE_PATH.exists())
         self.assertTrue(synthesizer.EDIT_TEMPLATE_PATH.exists())
         self.assertTrue(synthesizer.MULTI_VIEW_TEMPLATE_PATH.exists())
 
     def test_base_template_is_api_prompt_format(self):
-        template = json.loads(_template_path("image_z_image_turbo (2).json").read_text(encoding="utf-8"))
+        template = json.loads(_template_path("image_z_image_turbo.json").read_text(encoding="utf-8"))
 
         self.assertTrue(template)
         self.assertTrue(all("class_type" in node and "inputs" in node for node in template.values()))
@@ -68,14 +69,15 @@ class ExportedTemplateContractTests(unittest.TestCase):
         template = json.loads(_template_path("image_qwen_image_edit_2509.json").read_text(encoding="utf-8"))
         load_nodes = [node for node in template.values() if node.get("class_type") == "LoadImage"]
 
-        self.assertEqual(len(load_nodes), 1)
-        self.assertIn("image", load_nodes[0]["inputs"])
-        self.assertNotEqual(load_nodes[0]["inputs"]["image"], "___BASE_IMAGE___")
-        self.assertIn("___CUSTOM_PROMPT___", json.dumps(template, ensure_ascii=False))
+        self.assertEqual(len(load_nodes), 3)
+        self.assertTrue(all("image" in node["inputs"] for node in load_nodes))
+        serialized = json.dumps(template, ensure_ascii=False)
+        self.assertIn("___CUSTOM_PROMPT___", serialized)
+        self.assertIn("___CUSTOM_NEGATIVE_PROMPT___", serialized)
 
     def test_multi_view_template_keeps_exported_load_image_shape(self):
         template = json.loads(
-            _template_path("templates-1_click_multiple_character_angles-v1.0 (3) (1).json").read_text(
+            _template_path("templates-1_click_multiple_character_angles-v1.0.json").read_text(
                 encoding="utf-8"
             )
         )
@@ -86,12 +88,13 @@ class ExportedTemplateContractTests(unittest.TestCase):
         self.assertEqual(len(titled_nodes), 1)
         self.assertIn("image", titled_nodes[0]["inputs"])
         self.assertNotEqual(titled_nodes[0]["inputs"]["image"], "___TARGET_IMAGE___")
+        self.assertIn("__MULTI_ANGLE_NEGATIVE_PROMPT__", json.dumps(template, ensure_ascii=False))
 
 
 @unittest.skipUnless(HAS_PYDANTIC, "pydantic is required for schema tests")
 class SchemaContractTests(unittest.TestCase):
     def test_input_type_is_normalized_from_payload_shape(self):
-        from src.llm_pipeline.core.schemas import PipelineRequest
+        from src.core.schemas import PipelineRequest
 
         self.assertEqual(PipelineRequest(thread_id="t1", prompt="ring idea").input_type, "text")
         self.assertEqual(PipelineRequest(thread_id="t2", input_type="image", image_url="sample.png").input_type, "image_only")
@@ -119,7 +122,7 @@ class SchemaContractTests(unittest.TestCase):
         )
 
     def test_waiting_for_user_edit_is_valid_response_status(self):
-        from src.llm_pipeline.core.schemas import PipelineResponse
+        from src.core.schemas import PipelineResponse
 
         response = PipelineResponse(
             status="waiting_for_user_edit",
@@ -131,22 +134,44 @@ class SchemaContractTests(unittest.TestCase):
         self.assertEqual(response.status, "waiting_for_user_edit")
 
     def test_start_requires_prompt_or_image(self):
-        from src.llm_pipeline.core.schemas import PipelineRequest
+        from src.core.schemas import PipelineRequest
 
         with self.assertRaises(ValueError):
             PipelineRequest(thread_id="t-start", action="start")
 
     def test_thread_id_is_required(self):
-        from src.llm_pipeline.core.schemas import PipelineRequest
+        from src.core.schemas import PipelineRequest
 
         with self.assertRaises(ValueError):
             PipelineRequest(thread_id="", prompt="ring idea")
 
     def test_request_customization_requires_non_empty_prompt(self):
-        from src.llm_pipeline.core.schemas import PipelineRequest
+        from src.core.schemas import PipelineRequest
 
         with self.assertRaises(ValueError):
             PipelineRequest(thread_id="t-custom", action="request_customization", customization_prompt="")
+
+    def test_optional_reference_images_are_allowed_for_start_and_follow_up(self):
+        from src.core.schemas import PipelineRequest
+
+        start_request = PipelineRequest(
+            thread_id="t-start-ref",
+            action="start",
+            prompt="add engraving",
+            image_url="sample.png",
+            engraving_reference_image_url="engraving_ref.png",
+            gemstone_reference_image_url="gem_ref.png",
+        )
+        follow_up_request = PipelineRequest(
+            thread_id="t-follow-ref",
+            action="request_customization",
+            customization_prompt="make the engraving thinner",
+            engraving_reference_image_url="engraving_ref.png",
+        )
+
+        self.assertEqual(start_request.engraving_reference_image_url, "engraving_ref.png")
+        self.assertEqual(start_request.gemstone_reference_image_url, "gem_ref.png")
+        self.assertEqual(follow_up_request.engraving_reference_image_url, "engraving_ref.png")
 
 
 class FakeState:
@@ -225,7 +250,7 @@ class ApiWrapperTests(unittest.TestCase):
 
         api_module = importlib.import_module("server.api")
         app_module = importlib.import_module("server.app")
-        schemas = importlib.import_module("src.llm_pipeline.core.schemas")
+        schemas = importlib.import_module("src.core.schemas")
         original_handler = api_module.process_generation_request
         seen = {}
 
@@ -264,9 +289,9 @@ class ApiWrapperTests(unittest.TestCase):
 @unittest.skipUnless(HAS_RUNTIME_DEPS, "runtime dependencies are required for pipeline tests")
 class PipelineRuntimeTests(unittest.TestCase):
     def test_pipelines_lazy_initialize_graph_on_first_use(self):
-        agent = importlib.import_module("src.llm_pipeline.agent")
+        agent = importlib.import_module("src.agent")
         original_builder = agent.build_ring_generation_graph
-        original_module = sys.modules.pop("src.llm_pipeline.pipelines", None)
+        original_module = sys.modules.pop("src.pipelines", None)
         seen = {"calls": 0}
         sentinel = object()
 
@@ -276,7 +301,7 @@ class PipelineRuntimeTests(unittest.TestCase):
                 return sentinel
 
             agent.build_ring_generation_graph = fake_builder
-            pipelines = importlib.import_module("src.llm_pipeline.pipelines")
+            pipelines = importlib.import_module("src.pipelines")
 
             self.assertIsNone(pipelines.app_graph)
             self.assertEqual(seen["calls"], 0)
@@ -286,13 +311,13 @@ class PipelineRuntimeTests(unittest.TestCase):
         finally:
             agent.build_ring_generation_graph = original_builder
             if original_module is None:
-                sys.modules.pop("src.llm_pipeline.pipelines", None)
+                sys.modules.pop("src.pipelines", None)
             else:
-                sys.modules["src.llm_pipeline.pipelines"] = original_module
+                sys.modules["src.pipelines"] = original_module
 
     def test_vllm_multimodal_payload_uses_short_token_limit(self):
-        vllm_client = importlib.import_module("src.llm_pipeline.core.vllm_client")
-        config = importlib.import_module("src.llm_pipeline.core.config").config
+        vllm_client = importlib.import_module("src.core.vllm_client")
+        config = importlib.import_module("src.core.config").config
 
         seen = {}
         original_chat_client = vllm_client._chat_client
@@ -318,8 +343,8 @@ class PipelineRuntimeTests(unittest.TestCase):
         )
 
     def test_vllm_text_prompt_uses_prompt_token_limit(self):
-        vllm_client = importlib.import_module("src.llm_pipeline.core.vllm_client")
-        config = importlib.import_module("src.llm_pipeline.core.config").config
+        vllm_client = importlib.import_module("src.core.vllm_client")
+        config = importlib.import_module("src.core.config").config
 
         seen = {}
         original_chat_client = vllm_client._chat_client
@@ -336,7 +361,7 @@ class PipelineRuntimeTests(unittest.TestCase):
         self.assertEqual(seen["messages"][0]["content"], "rewrite this prompt")
 
     def test_vllm_embedding_function_returns_vectors(self):
-        vllm_client = importlib.import_module("src.llm_pipeline.core.vllm_client")
+        vllm_client = importlib.import_module("src.core.vllm_client")
 
         seen = {}
         embedder = vllm_client.VLLMEmbeddingFunction(model="embed-model", base_url="http://embed", api_key="token")
@@ -355,8 +380,9 @@ class PipelineRuntimeTests(unittest.TestCase):
         self.assertEqual(query, [0.1, 0.2, 0.3])
 
     def test_rag_uses_vllm_embedding_function(self):
-        rag = importlib.import_module("src.llm_pipeline.nodes.rag")
-        vllm_client = importlib.import_module("src.llm_pipeline.core.vllm_client")
+        rag = importlib.import_module("src.nodes.rag")
+        config = importlib.import_module("src.core.config").config
+        vllm_client = importlib.import_module("src.core.vllm_client")
 
         seen = {}
 
@@ -371,20 +397,23 @@ class PipelineRuntimeTests(unittest.TestCase):
 
         original_chroma = rag.Chroma
         original_exists = rag.os.path.exists
+        original_resolver = rag.resolve_active_collection_name
 
         try:
             rag.Chroma = FakeChroma
             rag.os.path.exists = lambda path: True
+            rag.resolve_active_collection_name = lambda: config.VECTOR_DB_STAGING_COLLECTION_NAME
             rag.RingVectorRAG()
         finally:
             rag.Chroma = original_chroma
             rag.os.path.exists = original_exists
+            rag.resolve_active_collection_name = original_resolver
 
-        self.assertEqual(seen["collection_name"], "ring_gemma_rules")
+        self.assertEqual(seen["collection_name"], config.VECTOR_DB_STAGING_COLLECTION_NAME)
         self.assertIsInstance(seen["embedding_function"], vllm_client.VLLMEmbeddingFunction)
 
     def test_generation_system_error_stops_without_retry(self):
-        agent = importlib.import_module("src.llm_pipeline.agent")
+        agent = importlib.import_module("src.agent")
 
         self.assertEqual(
             agent.check_base_validation({"generation_result": "system_error", "retry_count": 0, "is_valid": False}),
@@ -400,8 +429,8 @@ class PipelineRuntimeTests(unittest.TestCase):
         )
 
     def test_agent_retry_limits_follow_config(self):
-        agent = importlib.import_module("src.llm_pipeline.agent")
-        config = importlib.import_module("src.llm_pipeline.core.config").config
+        agent = importlib.import_module("src.agent")
+        config = importlib.import_module("src.core.config").config
 
         original_base = config.BASE_VALIDATION_MAX_RETRIES
         original_edit = config.EDIT_VALIDATION_MAX_RETRIES
@@ -421,8 +450,8 @@ class PipelineRuntimeTests(unittest.TestCase):
             config.REMBG_VALIDATION_MAX_RETRIES = original_rembg
 
     def test_agent_uses_sqlite_checkpointer_when_available(self):
-        agent = importlib.import_module("src.llm_pipeline.agent")
-        config = importlib.import_module("src.llm_pipeline.core.config").config
+        agent = importlib.import_module("src.agent")
+        config = importlib.import_module("src.core.config").config
 
         seen = {}
         original_saver = agent.SqliteSaver
@@ -454,7 +483,7 @@ class PipelineRuntimeTests(unittest.TestCase):
         self.assertFalse(seen["check_same_thread"])
 
     def test_agent_falls_back_to_memory_saver_without_sqlite_dependency(self):
-        agent = importlib.import_module("src.llm_pipeline.agent")
+        agent = importlib.import_module("src.agent")
 
         original_saver = agent.SqliteSaver
 
@@ -467,7 +496,7 @@ class PipelineRuntimeTests(unittest.TestCase):
         self.assertIsInstance(checkpointer, agent.MemorySaver)
 
     def test_environment_settings_only_override_environment_backed_fields(self):
-        config_module = importlib.import_module("src.llm_pipeline.core.config")
+        config_module = importlib.import_module("src.core.config")
         original_chat_base_url = os.environ.get("VLLM_CHAT_BASE_URL")
         original_validator_tokens = os.environ.get("VLLM_VALIDATOR_MAX_TOKENS")
         original_checkpoint_path = os.environ.get("LANGGRAPH_CHECKPOINT_DB_PATH")
@@ -502,7 +531,7 @@ class PipelineRuntimeTests(unittest.TestCase):
                 os.environ["LANGGRAPH_CHECKPOINT_DB_PATH"] = original_checkpoint_path
 
     def test_input_image_guardrail_routes_system_error_to_end(self):
-        agent = importlib.import_module("src.llm_pipeline.agent")
+        agent = importlib.import_module("src.agent")
 
         self.assertEqual(
             agent.check_input_image_processing({"guardrail_result": "system_error", "intent": "partial_modification"}),
@@ -518,7 +547,7 @@ class PipelineRuntimeTests(unittest.TestCase):
         )
 
     def test_validate_base_image_checks_background_contrast(self):
-        validator = importlib.import_module("src.llm_pipeline.nodes.validator")
+        validator = importlib.import_module("src.nodes.validator")
 
         seen = {}
         original_call = validator._call_vision_judge
@@ -540,13 +569,13 @@ class PipelineRuntimeTests(unittest.TestCase):
 
         self.assertTrue(result["is_valid"])
         self.assertEqual(seen["image_url"], "base.png")
-        self.assertIn("complementary or otherwise strongly contrasting", seen["prompt"])
+        self.assertIn("clearly separated from the background", seen["prompt"])
         self.assertIn("white/platinum/silver", seen["prompt"])
-        self.assertIn("visible ground plane", seen["prompt"])
-        self.assertIn("contact shadow", seen["prompt"])
+        self.assertIn("Allow mild shadow or reflection", seen["prompt"])
+        self.assertIn("severe shadows, strong reflections", seen["prompt"])
 
     def test_validate_input_image_distinguishes_system_error_from_repair(self):
-        validator = importlib.import_module("src.llm_pipeline.nodes.validator")
+        validator = importlib.import_module("src.nodes.validator")
 
         original_call = validator._call_vision_judge
 
@@ -579,8 +608,8 @@ class PipelineRuntimeTests(unittest.TestCase):
         self.assertEqual(repaired["guardrail_result"], "repair_required")
         self.assertIn("solid pitch black", repaired["customization_prompt"])
 
-    def test_synthesizer_enforces_strict_background_separation_prompt(self):
-        synthesizer = importlib.import_module("src.llm_pipeline.nodes.synthesizer")
+    def test_synthesizer_enforces_background_separation_prompt(self):
+        synthesizer = importlib.import_module("src.nodes.synthesizer")
 
         prompt = synthesizer._enforce_background_contrast(
             "platinum wedding ring",
@@ -591,12 +620,12 @@ class PipelineRuntimeTests(unittest.TestCase):
         self.assertIn("background color must strongly contrast with the ring material", prompt)
         self.assertIn("clearly visible empty inner hole", prompt)
         self.assertIn("single centered ring product photo", prompt)
-        self.assertIn("no cast shadow", prompt)
+        self.assertIn("avoid heavy cast shadow", prompt)
         self.assertIn("no watermark", prompt)
         self.assertIn("ring fully visible", prompt)
 
     def test_synthesizer_preserves_couple_ring_requests_without_forcing_single_ring(self):
-        synthesizer = importlib.import_module("src.llm_pipeline.nodes.synthesizer")
+        synthesizer = importlib.import_module("src.nodes.synthesizer")
 
         prompt = synthesizer._enforce_background_contrast(
             "18k white gold couple ring, simple product photography",
@@ -610,7 +639,7 @@ class PipelineRuntimeTests(unittest.TestCase):
         self.assertNotIn("exactly one representative hero ring only", prompt)
 
     def test_synthesizer_template_loader_returns_fresh_copy_even_when_cached(self):
-        synthesizer = importlib.import_module("src.llm_pipeline.nodes.synthesizer")
+        synthesizer = importlib.import_module("src.nodes.synthesizer")
 
         first = synthesizer._load_workflow_template(synthesizer.BASE_TEMPLATE_PATH)
         first["__test_mutation__"] = True
@@ -619,9 +648,47 @@ class PipelineRuntimeTests(unittest.TestCase):
 
         self.assertNotIn("__test_mutation__", second)
 
+    def test_edit_payload_replaces_negative_prompt_and_maps_three_load_images(self):
+        synthesizer = importlib.import_module("src.nodes.synthesizer")
+
+        payload = synthesizer._build_edit_payload(
+            base_image="base_ring.png",
+            custom_prompt="add the word forever",
+            custom_negative_prompt="text, watermark",
+            engraving_reference_image="engraving_ref.png",
+            gemstone_reference_image="",
+        )
+
+        workflow = payload["prompt"]
+        load_nodes = synthesizer._select_edit_load_image_nodes(workflow)
+        serialized = json.dumps(workflow, ensure_ascii=False)
+
+        self.assertNotIn("___CUSTOM_PROMPT___", serialized)
+        self.assertNotIn("___CUSTOM_NEGATIVE_PROMPT___", serialized)
+        self.assertEqual(load_nodes["image1"][1]["inputs"]["image"], "base_ring.png")
+        self.assertEqual(load_nodes["image2"][1]["inputs"]["image"], "engraving_ref.png")
+        self.assertEqual(load_nodes["image3"][1]["inputs"]["image"], "base_ring.png")
+        self.assertIn("text, watermark", serialized)
+
+    def test_multi_view_payload_replaces_negative_prompt_placeholder(self):
+        synthesizer = importlib.import_module("src.nodes.synthesizer")
+
+        payload = synthesizer._build_multi_view_payload(
+            "target_ring.png",
+            "props, table, heavy shadow",
+        )
+
+        workflow = payload["prompt"]
+        _, load_node = synthesizer._select_multi_view_load_image_node(workflow)
+        serialized = json.dumps(workflow, ensure_ascii=False)
+
+        self.assertEqual(load_node["inputs"]["image"], "target_ring.png")
+        self.assertNotIn("__MULTI_ANGLE_NEGATIVE_PROMPT__", serialized)
+        self.assertIn("props, table, heavy shadow", serialized)
+
     def test_generate_base_image_uses_configured_prompt_temperature(self):
-        synthesizer = importlib.import_module("src.llm_pipeline.nodes.synthesizer")
-        config = importlib.import_module("src.llm_pipeline.core.config").config
+        synthesizer = importlib.import_module("src.nodes.synthesizer")
+        config = importlib.import_module("src.core.config").config
 
         seen = {}
         original_prompt_temperature = config.VLLM_PROMPT_TEMPERATURE
@@ -656,7 +723,7 @@ class PipelineRuntimeTests(unittest.TestCase):
         self.assertEqual(result["generation_result"], "success")
 
     def test_edit_prompt_preserves_source_and_localizes_removal(self):
-        synthesizer = importlib.import_module("src.llm_pipeline.nodes.synthesizer")
+        synthesizer = importlib.import_module("src.nodes.synthesizer")
 
         prompt = synthesizer._compose_edit_prompt(
             {
@@ -678,13 +745,13 @@ class PipelineRuntimeTests(unittest.TestCase):
         self.assertIn("Do not add replacement decorations", prompt)
 
     def test_detect_customization_kind_recognizes_common_gemstone_names(self):
-        synthesizer = importlib.import_module("src.llm_pipeline.nodes.synthesizer")
+        synthesizer = importlib.import_module("src.nodes.synthesizer")
 
         self.assertEqual(synthesizer._detect_customization_kind("반지 중앙에 작은 사파이어 추가"), "gemstone")
         self.assertEqual(synthesizer._detect_customization_kind("가운데 다이아를 제거해줘"), "gemstone")
 
     def test_generate_base_image_uses_user_prompt_for_background_inference(self):
-        synthesizer = importlib.import_module("src.llm_pipeline.nodes.synthesizer")
+        synthesizer = importlib.import_module("src.nodes.synthesizer")
 
         original_invoke = synthesizer.invoke_text_prompt
         original_build_payload = synthesizer._build_base_payload
@@ -713,14 +780,14 @@ class PipelineRuntimeTests(unittest.TestCase):
         self.assertNotIn("single flat pure pitch-black studio background", result["synthesized_prompt"])
 
     def test_extract_engraving_text_prefers_literal_token_before_korean_engraving_keyword(self):
-        synthesizer = importlib.import_module("src.llm_pipeline.nodes.synthesizer")
+        synthesizer = importlib.import_module("src.nodes.synthesizer")
 
         self.assertEqual(synthesizer._extract_engraving_text("안쪽에 forever 각인 추가"), "forever")
         self.assertEqual(synthesizer._extract_engraving_text("반지 안쪽에 forever 각인 추가"), "forever")
         self.assertEqual(synthesizer._extract_engraving_text("각인 문구는 forever"), "forever")
 
     def test_reason_requests_surface_retry_detects_ground_plane_and_shadow_failures(self):
-        synthesizer = importlib.import_module("src.llm_pipeline.nodes.synthesizer")
+        synthesizer = importlib.import_module("src.nodes.synthesizer")
 
         self.assertTrue(
             synthesizer._reason_requests_surface_retry(
@@ -729,8 +796,8 @@ class PipelineRuntimeTests(unittest.TestCase):
         )
         self.assertFalse(synthesizer._reason_requests_surface_retry("The female ring is missing its small diamond points."))
 
-    def test_build_base_retry_directive_strengthens_opposite_background_and_surface_constraints(self):
-        synthesizer = importlib.import_module("src.llm_pipeline.nodes.synthesizer")
+    def test_build_base_retry_directive_strengthens_background_separation_and_surface_constraints(self):
+        synthesizer = importlib.import_module("src.nodes.synthesizer")
 
         directive = synthesizer._build_base_retry_directive(
             "플래티넘 웨딩 커플링 한 쌍",
@@ -739,12 +806,12 @@ class PipelineRuntimeTests(unittest.TestCase):
         )
 
         self.assertIn("single flat pure pitch-black studio background", directive)
-        self.assertIn("background must be the direct opposite color family of the ring material", directive)
-        self.assertIn("no support surface anywhere in frame", directive)
+        self.assertIn("background must keep the ring silhouette and inner hole clearly separated", directive)
+        self.assertIn("avoid visible support surfaces or ground planes", directive)
         self.assertIn("exactly two distinct rings for a couple-ring request", directive)
 
     def test_build_edit_retry_directive_strengthens_inner_band_and_integration_constraints(self):
-        synthesizer = importlib.import_module("src.llm_pipeline.nodes.synthesizer")
+        synthesizer = importlib.import_module("src.nodes.synthesizer")
 
         directive = synthesizer._build_edit_retry_directive(
             "반지 안쪽에 forever 각인 추가",
@@ -759,7 +826,7 @@ class PipelineRuntimeTests(unittest.TestCase):
         self.assertIn("engraving must be carved into the metal surface", directive)
 
     def test_compose_edit_prompt_respects_inner_band_engraving_request(self):
-        synthesizer = importlib.import_module("src.llm_pipeline.nodes.synthesizer")
+        synthesizer = importlib.import_module("src.nodes.synthesizer")
 
         prompt = synthesizer._compose_edit_prompt(
             {
@@ -778,11 +845,11 @@ class PipelineRuntimeTests(unittest.TestCase):
         self.assertIn("Engrave only the exact text 'forever' on the inner band.", prompt)
         self.assertIn("Do not place any letters, symbols, or markings on the visible outer surface.", prompt)
         self.assertIn("Retry-specific constraints:", prompt)
-        self.assertIn("no contact shadow", prompt)
+        self.assertIn("engraving must be carved into the metal surface", prompt)
 
     def test_customization_context_uses_configured_rag_top_k(self):
-        synthesizer = importlib.import_module("src.llm_pipeline.nodes.synthesizer")
-        config = importlib.import_module("src.llm_pipeline.core.config").config
+        synthesizer = importlib.import_module("src.nodes.synthesizer")
+        config = importlib.import_module("src.core.config").config
 
         seen = {}
         original_top_k = config.CUSTOMIZATION_RAG_TOP_K
@@ -812,7 +879,7 @@ class PipelineRuntimeTests(unittest.TestCase):
         self.assertIn("blue sapphire", seen["query"])
 
     def test_validate_base_image_preserves_generation_system_error_message(self):
-        validator = importlib.import_module("src.llm_pipeline.nodes.validator")
+        validator = importlib.import_module("src.nodes.validator")
 
         result = validator.validate_base_image(
             {
@@ -828,7 +895,7 @@ class PipelineRuntimeTests(unittest.TestCase):
         self.assertEqual(result["status_message"], "ComfyUI request failed with HTTP 500: missing model")
 
     def test_validator_resolves_plain_comfy_filename_to_input_view_url(self):
-        validator = importlib.import_module("src.llm_pipeline.nodes.validator")
+        validator = importlib.import_module("src.nodes.validator")
 
         seen = {}
 
@@ -854,7 +921,7 @@ class PipelineRuntimeTests(unittest.TestCase):
         self.assertIn("/view?filename=sample_input.png&type=input", seen["url"])
 
     def test_validator_preserves_image_mime_type_in_data_url(self):
-        validator = importlib.import_module("src.llm_pipeline.nodes.validator")
+        validator = importlib.import_module("src.nodes.validator")
 
         seen = {}
 
@@ -889,7 +956,7 @@ class PipelineRuntimeTests(unittest.TestCase):
         self.assertTrue(seen["image_data_url"].startswith("data:image/jpeg;base64,"))
 
     def test_validator_accepts_fenced_json_response(self):
-        validator = importlib.import_module("src.llm_pipeline.nodes.validator")
+        validator = importlib.import_module("src.nodes.validator")
 
         class FakeResponse:
             content = b"fake-png-bytes"
@@ -919,7 +986,7 @@ class PipelineRuntimeTests(unittest.TestCase):
         self.assertEqual(result["reason"], "ok")
 
     def test_parse_json_object_extracts_embedded_json_block(self):
-        validator = importlib.import_module("src.llm_pipeline.nodes.validator")
+        validator = importlib.import_module("src.nodes.validator")
 
         parsed = validator._parse_json_object(
             "Here is the result:\n```json\n{\"is_valid\": false, \"reason\": \"bad\"}\n```\nThanks."
@@ -929,7 +996,7 @@ class PipelineRuntimeTests(unittest.TestCase):
         self.assertEqual(parsed["reason"], "bad")
 
     def test_multi_view_only_edit_success_skips_second_wait(self):
-        agent = importlib.import_module("src.llm_pipeline.agent")
+        agent = importlib.import_module("src.agent")
 
         self.assertEqual(
             agent.check_edit_validation({"is_valid": True, "retry_count": 0, "intent": "multi_view_only"}),
@@ -941,8 +1008,8 @@ class PipelineRuntimeTests(unittest.TestCase):
         )
 
     def test_start_request_copies_prompt_into_customization_for_image_and_text(self):
-        schemas = importlib.import_module("src.llm_pipeline.core.schemas")
-        pipelines = importlib.import_module("src.llm_pipeline.pipelines")
+        schemas = importlib.import_module("src.core.schemas")
+        pipelines = importlib.import_module("src.pipelines")
 
         fake_graph = FakeGraph(FakeState({"edited_ring_image_url": "edited.png"}, ("wait_for_edit_approval",)))
         original_graph = pipelines.app_graph
@@ -954,6 +1021,8 @@ class PipelineRuntimeTests(unittest.TestCase):
                 input_type="image_and_text",
                 prompt="inside engraving forever",
                 image_url="uploaded.png",
+                engraving_reference_image_url="engraving_ref.png",
+                gemstone_reference_image_url="gem_ref.png",
             )
             pipelines.process_generation_request(request)
         finally:
@@ -962,10 +1031,12 @@ class PipelineRuntimeTests(unittest.TestCase):
         initial_state = fake_graph.invocations[0][0]
         self.assertEqual(initial_state["customization_prompt"], "inside engraving forever")
         self.assertEqual(initial_state["input_type"], "image_and_text")
+        self.assertEqual(initial_state["engraving_reference_image_url"], "engraving_ref.png")
+        self.assertEqual(initial_state["gemstone_reference_image_url"], "gem_ref.png")
 
     def test_success_requires_non_empty_output_urls(self):
-        schemas = importlib.import_module("src.llm_pipeline.core.schemas")
-        pipelines = importlib.import_module("src.llm_pipeline.pipelines")
+        schemas = importlib.import_module("src.core.schemas")
+        pipelines = importlib.import_module("src.pipelines")
 
         fake_state = FakeState(
             {
@@ -994,8 +1065,8 @@ class PipelineRuntimeTests(unittest.TestCase):
         self.assertEqual(response.message, "empty outputs")
 
     def test_follow_up_action_rejects_missing_thread(self):
-        schemas = importlib.import_module("src.llm_pipeline.core.schemas")
-        pipelines = importlib.import_module("src.llm_pipeline.pipelines")
+        schemas = importlib.import_module("src.core.schemas")
+        pipelines = importlib.import_module("src.pipelines")
 
         fake_graph = FakeGraph(FakeState({}, ()))
         original_graph = pipelines.app_graph
@@ -1014,8 +1085,8 @@ class PipelineRuntimeTests(unittest.TestCase):
         self.assertEqual(fake_graph.invocations, [])
 
     def test_follow_up_action_requires_paused_waiting_state(self):
-        schemas = importlib.import_module("src.llm_pipeline.core.schemas")
-        pipelines = importlib.import_module("src.llm_pipeline.pipelines")
+        schemas = importlib.import_module("src.core.schemas")
+        pipelines = importlib.import_module("src.pipelines")
 
         fake_graph = FakeGraph(FakeState({"base_ring_image_url": "base.png"}, ()))
         original_graph = pipelines.app_graph
@@ -1037,8 +1108,41 @@ class PipelineRuntimeTests(unittest.TestCase):
         self.assertEqual(fake_graph.updated_state, [])
         self.assertEqual(fake_graph.invocations, [])
 
+    def test_request_customization_updates_optional_reference_images_when_provided(self):
+        schemas = importlib.import_module("src.core.schemas")
+        pipelines = importlib.import_module("src.pipelines")
+
+        fake_state = FakeState(
+            {
+                "edited_ring_image_url": "edited.png",
+                "edited_ring_image_ref": "edited.png",
+            },
+            ("wait_for_edit_approval",),
+        )
+        fake_graph = FakeGraph(fake_state)
+        original_graph = pipelines.app_graph
+        pipelines.app_graph = fake_graph
+
+        try:
+            pipelines.process_generation_request(
+                schemas.PipelineRequest(
+                    thread_id="thread-follow-up-ref",
+                    action="request_customization",
+                    customization_prompt="make the engraving thinner",
+                    engraving_reference_image_url="new_engraving_ref.png",
+                    gemstone_reference_image_url="new_gem_ref.png",
+                )
+            )
+        finally:
+            pipelines.app_graph = original_graph
+
+        update_payload = fake_graph.updated_state[0][1]
+        self.assertEqual(update_payload["customization_prompt"], "make the engraving thinner")
+        self.assertEqual(update_payload["engraving_reference_image_url"], "new_engraving_ref.png")
+        self.assertEqual(update_payload["gemstone_reference_image_url"], "new_gem_ref.png")
+
     def test_synthesizer_bridges_output_view_url_into_input_filename(self):
-        synthesizer = importlib.import_module("src.llm_pipeline.nodes.synthesizer")
+        synthesizer = importlib.import_module("src.nodes.synthesizer")
 
         seen = {}
 
@@ -1083,7 +1187,7 @@ class PipelineRuntimeTests(unittest.TestCase):
         self.assertEqual(seen["upload_name"], "ComfyUI_00003_.png")
 
     def test_sync_call_comfyui_prefers_output_images_over_temp(self):
-        synthesizer = importlib.import_module("src.llm_pipeline.nodes.synthesizer")
+        synthesizer = importlib.import_module("src.nodes.synthesizer")
 
         class FakePostResponse:
             def raise_for_status(self):
@@ -1139,7 +1243,7 @@ class PipelineRuntimeTests(unittest.TestCase):
         )
 
     def test_rag_does_not_duplicate_category_prefix_in_context(self):
-        rag = importlib.import_module("src.llm_pipeline.nodes.rag")
+        rag = importlib.import_module("src.nodes.rag")
 
         class FakeDoc:
             def __init__(self, page_content, metadata):
@@ -1177,17 +1281,19 @@ class PipelineRuntimeTests(unittest.TestCase):
         )
 
     def test_rag_reuses_cached_engine_for_same_config(self):
-        rag = importlib.import_module("src.llm_pipeline.nodes.rag")
-        config = importlib.import_module("src.llm_pipeline.core.config").config
+        rag = importlib.import_module("src.nodes.rag")
+        config = importlib.import_module("src.core.config").config
 
         seen = {"init_calls": 0, "queries": []}
         original_factory = rag.RingVectorRAG
+        original_resolver = rag.resolve_active_collection_name
 
         class FakeRagEngine:
-            def __init__(self, vector_db_path=None, embed_model=None):
+            def __init__(self, vector_db_path=None, embed_model=None, collection_name=None):
                 seen["init_calls"] += 1
                 seen["vector_db_path"] = vector_db_path
                 seen["embed_model"] = embed_model
+                seen["collection_name"] = collection_name
 
             def search_ring_rules(self, query, top_k=None):
                 seen["queries"].append((query, top_k))
@@ -1196,25 +1302,68 @@ class PipelineRuntimeTests(unittest.TestCase):
         try:
             rag._get_rag_engine.cache_clear()
             rag.RingVectorRAG = FakeRagEngine
+            rag.resolve_active_collection_name = lambda: config.VECTOR_DB_PRIMARY_COLLECTION_NAME
 
             first = rag.retrieve_rules_for_query("add a gem", top_k=1)
             second = rag.retrieve_rules_for_query("add engraving", top_k=2)
         finally:
             rag.RingVectorRAG = original_factory
+            rag.resolve_active_collection_name = original_resolver
             rag._get_rag_engine.cache_clear()
 
         self.assertEqual(seen["init_calls"], 1)
         self.assertEqual(seen["vector_db_path"], config.VECTOR_DB_PATH)
         self.assertEqual(seen["embed_model"], config.VLLM_EMBED_MODEL)
+        self.assertEqual(seen["collection_name"], config.VECTOR_DB_PRIMARY_COLLECTION_NAME)
         self.assertEqual(first, "context:add a gem:1")
         self.assertEqual(second, "context:add engraving:2")
+
+    def test_rag_rebuilds_engine_after_active_collection_switch(self):
+        rag = importlib.import_module("src.nodes.rag")
+        config = importlib.import_module("src.core.config").config
+
+        seen = {"collections": []}
+        original_factory = rag.RingVectorRAG
+        original_resolver = rag.resolve_active_collection_name
+        active_collections = iter(
+            [
+                config.VECTOR_DB_PRIMARY_COLLECTION_NAME,
+                config.VECTOR_DB_STAGING_COLLECTION_NAME,
+            ]
+        )
+
+        class FakeRagEngine:
+            def __init__(self, vector_db_path=None, embed_model=None, collection_name=None):
+                seen["collections"].append(collection_name)
+
+            def search_ring_rules(self, query, top_k=None):
+                return f"{query}:{top_k}"
+
+        try:
+            rag._get_rag_engine.cache_clear()
+            rag.RingVectorRAG = FakeRagEngine
+            rag.resolve_active_collection_name = lambda: next(active_collections)
+            rag.retrieve_rules_for_query("first", top_k=1)
+            rag.retrieve_rules_for_query("second", top_k=2)
+        finally:
+            rag.RingVectorRAG = original_factory
+            rag.resolve_active_collection_name = original_resolver
+            rag._get_rag_engine.cache_clear()
+
+        self.assertEqual(
+            seen["collections"],
+            [
+                config.VECTOR_DB_PRIMARY_COLLECTION_NAME,
+                config.VECTOR_DB_STAGING_COLLECTION_NAME,
+            ],
+        )
 
 
 @unittest.skipUnless(HAS_DB_DEPS, "db feeder dependencies are required for feeder tests")
 class DbFeederContractTests(unittest.TestCase):
     def test_db_feeder_builds_vector_store_with_vllm_embeddings(self):
-        db_feeder = importlib.import_module("src.llm_pipeline.scripts.db_feeder")
-        vllm_client = importlib.import_module("src.llm_pipeline.core.vllm_client")
+        db_feeder = importlib.import_module("src.scripts.db_feeder")
+        vllm_client = importlib.import_module("src.core.vllm_client")
 
         fake_langchain_chroma = SimpleNamespace()
         seen = {}
@@ -1230,19 +1379,194 @@ class DbFeederContractTests(unittest.TestCase):
         sys.modules["langchain_chroma"] = fake_langchain_chroma
 
         try:
-            db_feeder._build_vector_store("vector-path")
+            db_feeder._build_vector_store("vector-path", collection_name="custom-collection")
         finally:
             if original_module is None:
                 del sys.modules["langchain_chroma"]
             else:
                 sys.modules["langchain_chroma"] = original_module
 
-        self.assertEqual(seen["collection_name"], "ring_gemma_rules")
+        self.assertEqual(seen["collection_name"], "custom-collection")
         self.assertEqual(seen["persist_directory"], "vector-path")
         self.assertIsInstance(seen["embedding_function"], vllm_client.VLLMEmbeddingFunction)
 
+    def test_db_feeder_safe_refresh_switches_pointer_and_preserves_backup(self):
+        db_feeder = importlib.import_module("src.scripts.db_feeder")
+        config = importlib.import_module("src.core.config").config
+
+        store_state = {
+            config.VECTOR_DB_PRIMARY_COLLECTION_NAME: {
+                "ids": ["old-doc"],
+                "documents": ["legacy rule"],
+                "metadatas": [{"category": "Legacy"}],
+            },
+            config.VECTOR_DB_STAGING_COLLECTION_NAME: {
+                "ids": [],
+                "documents": [],
+                "metadatas": [],
+            },
+            config.VECTOR_DB_BACKUP_COLLECTION_NAME: {
+                "ids": [],
+                "documents": [],
+                "metadatas": [],
+            },
+        }
+
+        class FakeChroma:
+            def __init__(self, collection_name, embedding_function, persist_directory):
+                self.collection_name = collection_name
+
+            def delete_collection(self):
+                store_state[self.collection_name] = {"ids": [], "documents": [], "metadatas": []}
+
+            def add_texts(self, texts, metadatas, ids):
+                store_state[self.collection_name] = {
+                    "ids": list(ids),
+                    "documents": list(texts),
+                    "metadatas": list(metadatas),
+                }
+
+            def get(self, include=None):
+                snapshot = store_state.get(
+                    self.collection_name,
+                    {"ids": [], "documents": [], "metadatas": []},
+                )
+                return {
+                    "ids": list(snapshot["ids"]),
+                    "documents": list(snapshot["documents"]),
+                    "metadatas": list(snapshot["metadatas"]),
+                }
+
+        original_builder = db_feeder._build_vector_store
+        original_db_path = config.VECTOR_DB_PATH
+        original_pointer_path = config.VECTOR_DB_COLLECTION_POINTER_PATH
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            pointer_path = Path(temp_dir) / "active_collection.txt"
+            pointer_path.write_text(f"{config.VECTOR_DB_PRIMARY_COLLECTION_NAME}\n", encoding="utf-8")
+
+            try:
+                config.VECTOR_DB_PATH = temp_dir
+                config.VECTOR_DB_COLLECTION_POINTER_PATH = str(pointer_path)
+                db_feeder._build_vector_store = (
+                    lambda persist_directory, collection_name=None: FakeChroma(
+                        collection_name or config.VECTOR_DB_PRIMARY_COLLECTION_NAME,
+                        None,
+                        persist_directory,
+                    )
+                )
+                db_feeder.init_vector_db(reset_collection=True)
+            finally:
+                db_feeder._build_vector_store = original_builder
+                config.VECTOR_DB_PATH = original_db_path
+                config.VECTOR_DB_COLLECTION_POINTER_PATH = original_pointer_path
+
+            self.assertEqual(
+                pointer_path.read_text(encoding="utf-8").strip(),
+                config.VECTOR_DB_STAGING_COLLECTION_NAME,
+            )
+            self.assertEqual(
+                store_state[config.VECTOR_DB_BACKUP_COLLECTION_NAME]["ids"],
+                ["old-doc"],
+            )
+            self.assertEqual(
+                len(store_state[config.VECTOR_DB_STAGING_COLLECTION_NAME]["ids"]),
+                len(db_feeder.CURATED_RULES),
+            )
+            self.assertEqual(
+                store_state[config.VECTOR_DB_PRIMARY_COLLECTION_NAME]["ids"],
+                ["old-doc"],
+            )
+
+    def test_db_feeder_failed_staging_refresh_keeps_pointer_and_backup(self):
+        db_feeder = importlib.import_module("src.scripts.db_feeder")
+        config = importlib.import_module("src.core.config").config
+
+        store_state = {
+            config.VECTOR_DB_PRIMARY_COLLECTION_NAME: {
+                "ids": ["active-doc"],
+                "documents": ["current active rule"],
+                "metadatas": [{"category": "Active"}],
+            },
+            config.VECTOR_DB_STAGING_COLLECTION_NAME: {
+                "ids": [],
+                "documents": [],
+                "metadatas": [],
+            },
+            config.VECTOR_DB_BACKUP_COLLECTION_NAME: {
+                "ids": ["backup-doc"],
+                "documents": ["previous backup rule"],
+                "metadatas": [{"category": "Backup"}],
+            },
+        }
+
+        class FakeChroma:
+            def __init__(self, collection_name, embedding_function, persist_directory):
+                self.collection_name = collection_name
+
+            def delete_collection(self):
+                store_state[self.collection_name] = {"ids": [], "documents": [], "metadatas": []}
+
+            def add_texts(self, texts, metadatas, ids):
+                if self.collection_name == config.VECTOR_DB_STAGING_COLLECTION_NAME:
+                    raise RuntimeError("embedding server unavailable")
+                store_state[self.collection_name] = {
+                    "ids": list(ids),
+                    "documents": list(texts),
+                    "metadatas": list(metadatas),
+                }
+
+            def get(self, include=None):
+                snapshot = store_state.get(
+                    self.collection_name,
+                    {"ids": [], "documents": [], "metadatas": []},
+                )
+                return {
+                    "ids": list(snapshot["ids"]),
+                    "documents": list(snapshot["documents"]),
+                    "metadatas": list(snapshot["metadatas"]),
+                }
+
+        original_builder = db_feeder._build_vector_store
+        original_db_path = config.VECTOR_DB_PATH
+        original_pointer_path = config.VECTOR_DB_COLLECTION_POINTER_PATH
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            pointer_path = Path(temp_dir) / "active_collection.txt"
+            pointer_path.write_text(f"{config.VECTOR_DB_PRIMARY_COLLECTION_NAME}\n", encoding="utf-8")
+
+            try:
+                config.VECTOR_DB_PATH = temp_dir
+                config.VECTOR_DB_COLLECTION_POINTER_PATH = str(pointer_path)
+                db_feeder._build_vector_store = (
+                    lambda persist_directory, collection_name=None: FakeChroma(
+                        collection_name or config.VECTOR_DB_PRIMARY_COLLECTION_NAME,
+                        None,
+                        persist_directory,
+                    )
+                )
+                with self.assertRaisesRegex(RuntimeError, "embedding server unavailable"):
+                    db_feeder.init_vector_db(reset_collection=True)
+            finally:
+                db_feeder._build_vector_store = original_builder
+                config.VECTOR_DB_PATH = original_db_path
+                config.VECTOR_DB_COLLECTION_POINTER_PATH = original_pointer_path
+
+            self.assertEqual(
+                pointer_path.read_text(encoding="utf-8").strip(),
+                config.VECTOR_DB_PRIMARY_COLLECTION_NAME,
+            )
+            self.assertEqual(
+                store_state[config.VECTOR_DB_BACKUP_COLLECTION_NAME]["ids"],
+                ["backup-doc"],
+            )
+            self.assertEqual(
+                store_state[config.VECTOR_DB_PRIMARY_COLLECTION_NAME]["ids"],
+                ["active-doc"],
+            )
+
     def test_curated_rules_are_rich_and_stable(self):
-        db_feeder = importlib.import_module("src.llm_pipeline.scripts.db_feeder")
+        db_feeder = importlib.import_module("src.scripts.db_feeder")
 
         docs = db_feeder.CURATED_RULES
         ids = [doc["id"] for doc in docs]

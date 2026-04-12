@@ -23,6 +23,8 @@ def _build_initial_state(request: PipelineRequest) -> dict:
         "retry_count": 0,
         "intent": "",
         "customization_prompt": customization_prompt,
+        "engraving_reference_image_url": request.engraving_reference_image_url or "",
+        "gemstone_reference_image_url": request.gemstone_reference_image_url or "",
         "customization_context": "",
         "customization_kind": "",
         "expected_engraving_text": "",
@@ -95,15 +97,18 @@ def process_generation_request(request: PipelineRequest) -> PipelineResponse:
             invalid_follow_up = _validate_follow_up_thread(thread_config)
             if invalid_follow_up is not None:
                 return invalid_follow_up
-            graph.update_state(
-                thread_config,
-                {
-                    "intent": "user_requested_customization",
-                    "customization_prompt": request.customization_prompt or "",
-                    "retry_count": 0,
-                    "status_message": "",
-                },
-            )
+            update_payload = {
+                "intent": "user_requested_customization",
+                "customization_prompt": request.customization_prompt or "",
+                "retry_count": 0,
+                "status_message": "",
+            }
+            if request.engraving_reference_image_url is not None:
+                update_payload["engraving_reference_image_url"] = request.engraving_reference_image_url or ""
+            if request.gemstone_reference_image_url is not None:
+                update_payload["gemstone_reference_image_url"] = request.gemstone_reference_image_url or ""
+
+            graph.update_state(thread_config, update_payload)
             logger.info("Resuming LangGraph after request_customization.")
             graph.invoke(None, config=thread_config)
 

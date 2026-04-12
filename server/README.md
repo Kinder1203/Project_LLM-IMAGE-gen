@@ -1,7 +1,7 @@
-# Server README
+﻿# Server README
 
-이 문서는 백엔드가 호출할 HTTP 레이어만 설명합니다.  
-파이프라인 흐름, 액션 의미, 상태 전이 세부 규칙은 [src/llm_pipeline/README.md](../src/llm_pipeline/README.md)를 기준으로 봅니다.
+이 문서는 상위 애플리케이션 백엔드가 호출할 HTTP wrapper만 설명합니다.  
+파이프라인 흐름, 액션 의미, 상태 전이 세부 규칙은 [src/README.md](../src/README.md)를 기준으로 봅니다.
 
 ## 개요
 
@@ -9,7 +9,16 @@
 - 기본 문서: `/docs`
 - OpenAPI JSON: `/openapi.json`
 
-이 서비스는 프론트엔드가 직접 호출하는 용도가 아니라, 백엔드가 내부 API처럼 호출하는 전제를 둡니다.
+이 wrapper는 프론트엔드가 직접 호출하는 용도가 아니라, 상위 애플리케이션 백엔드가 내부 API처럼 호출하는 전제를 둡니다. FastAPI는 내부적으로 `process_generation_request()`를 HTTP로 노출할 뿐, 파이프라인 의미 계약 자체는 `src/README.md`에서 관리합니다.
+
+## 호출 경계
+
+```text
+프론트엔드
+  -> 상위 애플리케이션 백엔드
+  -> HTTP wrapper (/pipeline)
+  -> process_generation_request()
+```
 
 ## 엔드포인트
 
@@ -51,7 +60,7 @@
 
 파이프라인 시작과 HITL 재개를 모두 처리하는 단일 엔드포인트입니다.
 
-요청 바디는 [PipelineRequest](../src/llm_pipeline/core/schemas.py)와 같고, 응답 바디는 [PipelineResponse](../src/llm_pipeline/core/schemas.py)와 같습니다.
+요청 바디는 [PipelineRequest](../src/core/schemas.py)와 같고, 응답 바디는 [PipelineResponse](../src/core/schemas.py)와 같습니다. 액션 의미, 입력 canonicalization, 상태 전이 자체는 이 문서가 아니라 [src/README.md](../src/README.md)를 기준으로 해석합니다.
 
 ## 요청 필드
 
@@ -62,6 +71,8 @@
 | `prompt` | string \| null | 조건부 | 시작 요청의 텍스트 설명 |
 | `image_url` | string \| null | 조건부 | 기존 반지 이미지 URL 또는 ComfyUI 업로드 이미지명 |
 | `customization_prompt` | string \| null | 조건부 | 재수정 요청 프롬프트 |
+| `engraving_reference_image_url` | string \| null | 선택 | edit 시나리오용 각인/문양 참고 이미지 |
+| `gemstone_reference_image_url` | string \| null | 선택 | edit 시나리오용 큐빅/보석 참고 이미지 |
 | `input_type` | string | 아니오 | 외부에서 보내도 되지만 서버에서 payload shape 기준으로 정규화 |
 
 ## 요청 예시
@@ -84,7 +95,8 @@
   "thread_id": "2c1bfe4d-8b8b-4d50-8cd0-5f72a0f0d9d9",
   "action": "start",
   "prompt": "안쪽에 forever 각인 추가",
-  "image_url": "uploaded_ring.png"
+  "image_url": "uploaded_ring.png",
+  "engraving_reference_image_url": "engraving_reference.png"
 }
 ```
 
@@ -113,17 +125,18 @@
 {
   "thread_id": "2c1bfe4d-8b8b-4d50-8cd0-5f72a0f0d9d9",
   "action": "request_customization",
-  "customization_prompt": "보석은 빼고 안쪽 각인만 남겨줘"
+  "customization_prompt": "보석은 빼고 안쪽 각인만 남겨줘",
+  "engraving_reference_image_url": "engraving_reference_v2.png"
 }
 ```
 
 ## 응답 상태
 
-| `status` | 의미 | 백엔드 처리 |
+| `status` | 의미 | 상위 애플리케이션 백엔드 처리 |
 | --- | --- | --- |
 | `waiting_for_user` | 베이스 시안 검토 대기 | `base_image_url` 저장 후 승인/수정 UI 제공 |
 | `waiting_for_user_edit` | 수정 반영본 검토 대기 | `base_image_url` 저장 후 승인/재수정 UI 제공 |
-| `success` | 최종 다각도 결과 완료 | `optimized_image_urls` 저장 후 완료 처리 |
+| `success` | 최종 다각도 2D 이미지 세트 완료 | `optimized_image_urls` 저장 후 완료 처리 |
 | `failed` | 실패 | `message`를 사용자용 또는 운영 로그로 전달 |
 
 ## 응답 예시
@@ -153,12 +166,12 @@
 }
 ```
 
-## 백엔드 연동 규칙
+## 상위 애플리케이션 백엔드 연동 규칙
 
-1. 프론트엔드는 이 서비스가 아니라 백엔드를 호출합니다.
-2. 백엔드는 사용자별 `thread_id`를 저장하고 후속 액션에도 같은 값을 재사용합니다.
-3. 이미지 업로드가 있는 경우 백엔드는 `image_url`에 접근 가능한 URL이나 ComfyUI 업로드 이미지명을 전달합니다.
-4. `waiting_for_user`와 `waiting_for_user_edit`는 동기 응답으로만 오므로, 백엔드는 그 응답을 기준으로 화면 상태를 제어하면 됩니다.
+1. 프론트엔드는 이 서비스가 아니라 상위 애플리케이션 백엔드를 호출합니다.
+2. 상위 애플리케이션 백엔드는 사용자별 `thread_id`를 저장하고 후속 액션에도 같은 값을 재사용합니다.
+3. 이미지 업로드가 있는 경우 상위 애플리케이션 백엔드는 `image_url`에 접근 가능한 URL이나 ComfyUI 업로드 이미지명을 전달합니다.
+4. `waiting_for_user`와 `waiting_for_user_edit`는 동기 응답으로만 오므로, 상위 애플리케이션 백엔드는 그 응답을 기준으로 화면 상태를 제어하면 됩니다.
 5. `success` 시 최종 결과는 동기 응답으로도 오고, 환경에 따라 별도 웹훅 전송도 발생할 수 있습니다.
 
 ## 실행 순서
@@ -166,5 +179,5 @@
 1. `vLLM` chat 서버 기동
 2. `vLLM` embedding 서버 기동
 3. ComfyUI 기동
-4. `python -m src.llm_pipeline.scripts.db_feeder`
+4. `python -m src.scripts.db_feeder`
 5. `uvicorn server.app:app --host 0.0.0.0 --port 8080`

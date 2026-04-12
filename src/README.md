@@ -1,6 +1,6 @@
-# llm_pipeline 패키지 계약
+﻿# src 패키지 계약
 
-`src/llm_pipeline/`는 반지 커스텀 파이프라인의 실제 실행 패키지입니다. 이 문서는 파이프라인 흐름, 입력 계약, 상태 전이, 검수 정책의 단일 기준 문서입니다.
+`src/`는 반지 커스텀 파이프라인의 실제 실행 패키지입니다. 이 문서는 파이프라인 흐름, 입력 계약, 상태 전이, 검수 정책, HITL, webhook, RAG 재색인 규칙의 단일 기준 문서입니다. 현재 공개 계약의 최종 산출물은 다각도 2D 이미지 세트이며, API 필드명은 호환성을 위해 `optimized_image_urls`를 그대로 유지합니다.
 
 계약이 바뀌면 `tests.test_pipeline_contract`도 함께 맞춰 문서와 자동 검증이 같은 기준을 보도록 유지합니다.
 
@@ -9,17 +9,17 @@
 - `tests.test_pipeline_contract`는 이 계약을 가볍게 회귀 확인하는 하네스입니다. 기본 목표는 실제 모델을 매번 끝까지 돌리는 것이 아니라, 스키마, 상태 흐름, 템플릿 shape, wrapper 경계가 문서와 어긋나지 않게 유지하는 것입니다.
 - 하네스는 대략 다섯 층을 나눠 봅니다. `ExportedTemplateContractTests`는 ComfyUI 템플릿 경로/shape를, `SchemaContractTests`는 요청·응답 정규화를, `ApiWrapperTests`는 HTTP wrapper를, `PipelineRuntimeTests`는 LangGraph 재개·웹훅·fallback 동작을, `DbFeederContractTests`는 RAG 적재 계약을 확인합니다.
 - 이 하네스는 실제 `vLLM`/ComfyUI 서버가 켜진 상태의 이미지 품질까지 대신 보장하지 않습니다. 그런 검증은 `python test_run.py`나 실환경 smoke run으로 별도 확인합니다.
-- 루트 `README.md`는 온보딩과 실행 방법만 요약하고, `server/README.md`는 HTTP transport 계약만 설명합니다. 세부 시나리오 의미를 다른 문서에 다시 길게 복제하지 않습니다.
-- `src/llm_pipeline/scripts/README.md`는 운영 스크립트 메모만 담당하며, 파이프라인 본문 계약은 이 문서를 기준으로 삼습니다.
+- 루트 `README.md`는 온보딩과 실행 방법만 요약하고, `server/README.md`는 HTTP wrapper 계약만 설명합니다. `src/scripts/README.md`는 운영 스크립트 메모만 담당합니다.
+- 계약 변경 작업은 `계약 문서 -> 계약 테스트 -> 코드 -> 데모 스크립트` 순서를 기준으로 정리합니다.
 
 ## 패키지 역할
 - `pipelines.py`: 외부 엔트리포인트 `process_generation_request()`와 동기 응답 포맷을 담당합니다.
 - `agent.py`: LangGraph 상태 그래프, 인터럽트 지점, 조건부 분기를 정의합니다.
-- `core/`: 설정(`config.py`), 공용 스키마(`schemas.py`), vLLM OpenAI-compatible 추론 클라이언트(`vllm_client.py`)를 둡니다.
+- `core/`: 설정(`config.py`), 공용 스키마(`schemas.py`), vLLM OpenAI-compatible 추론 클라이언트(`vllm_client.py`), 벡터 DB 런타임 유틸을 둡니다.
 - `nodes/`: 라우팅, RAG, ComfyUI 생성, Vision 검수를 수행합니다.
 - `scripts/`: DB 적재 같은 보조 운영 스크립트를 둡니다.
 
-HTTP wrapper는 패키지 밖 [server/app.py](../../server/app.py) / [server/api.py](../../server/api.py)에서 관리합니다.
+HTTP wrapper는 패키지 밖 [server/app.py](../server/app.py) / [server/api.py](../server/api.py)에서 관리합니다.
 
 ## 추론 백엔드 전제
 - 채팅·비전 추론은 `VLLM_CHAT_*` 설정을 사용하는 `vLLM` 인스턴스 1개를 기준으로 합니다.
@@ -47,6 +47,8 @@ UI나 데모에서는 사람 친화적인 표현을 써도 되지만, 실제 계
 | `prompt` | 반지 설명 또는 초기 수정 지시 |
 | `image_url` | 기존 반지 시안 또는 ComfyUI 업로드 이미지명 |
 | `customization_prompt` | 후속 수정 요청 시 사용할 프롬프트 |
+| `engraving_reference_image_url` | edit 시나리오에서 optional로 받는 각인/문양 참고 이미지 |
+| `gemstone_reference_image_url` | edit 시나리오에서 optional로 받는 큐빅/보석 참고 이미지 |
 
 ### 2. 외부 허용 입력 타입과 내부 canonical 값
 외부에서 허용하는 값은 아래 다섯 가지입니다.
@@ -77,6 +79,7 @@ UI나 데모에서는 사람 친화적인 표현을 써도 되지만, 실제 계
 - `action="start"`: `prompt` 또는 `image_url` 중 하나 이상이 반드시 있어야 합니다.
 - `action="accept_base"`: `thread_id`만 있으면 됩니다.
 - `action="request_customization"`: `thread_id`와 비어 있지 않은 `customization_prompt`가 반드시 있어야 합니다.
+- `engraving_reference_image_url`, `gemstone_reference_image_url`는 `start`와 `request_customization`에서만 의미가 있으며, edit 시나리오가 아니면 무시됩니다.
 - 빈 문자열 thread ID는 허용하지 않습니다.
 
 ## 상태 계약
@@ -86,7 +89,7 @@ UI나 데모에서는 사람 친화적인 표현을 써도 되지만, 실제 계
 | --- | --- | --- | --- |
 | `waiting_for_user` | 베이스 반지 시안 검토 대기 | `base_image_url`, `message` | `accept_base` 또는 `request_customization` |
 | `waiting_for_user_edit` | 커스텀 반영본 검토 대기 | `base_image_url`, `message` | `accept_base` 또는 `request_customization` |
-| `success` | 최종 다각도 이미지 생성 완료 | `optimized_image_urls`, `message` | 없음 |
+| `success` | 최종 다각도 2D 이미지 세트 생성 완료 | `optimized_image_urls`, `message` | 없음 |
 | `failed` | 생성 또는 검수 실패 | `message`, 필요 시 `base_image_url` | 없음 |
 
 보조 규칙:
@@ -131,12 +134,13 @@ UI나 데모에서는 사람 친화적인 표현을 써도 되지만, 실제 계
 시스템 오류는 배경 보정처럼 위장하지 않습니다.
 
 ### 베이스/수정본 검수
-- `validate_base_image`는 요청 반영 여부뿐 아니라 배경이 반지 재질과 충분히 대비되는지도 함께 검수합니다.
-- `validate_edited_image`는 커스텀 반영 여부를 검수합니다.
+- `validate_base_image`는 요청 반영 여부와 함께 반지 외곽선/inner hole이 배경에서 충분히 분리되는지를 검수합니다.
+- 약한 그림자, 약한 반사, 약한 바닥감은 허용하되, 분리도를 해칠 정도의 심한 shadow/reflection/background bleed는 실패로 봅니다.
+- `validate_edited_image`는 수정 요청이 실제로 반영됐는지와 추가 요소가 링에 자연스럽게 붙어 보이는지를 우선 검수합니다.
 - 생성 시스템 오류가 이미 발생했다면 Vision 검수로 넘기지 않고 즉시 실패 처리합니다.
 
 ### 다각도 검수
-- `validate_rembg`는 전체 다각도를 모두 검사하지 않고 `MULTI_VIEW_VALIDATION_SAMPLE_COUNT` 개의 대표 샘플만 검사합니다.
+- `validate_rembg`는 전체 다각도 결과를 모두 검사하지 않고 `MULTI_VIEW_VALIDATION_SAMPLE_COUNT` 개의 대표 샘플만 검사합니다.
 - 최종 성공은 `is_valid=True`이고 결과 이미지가 1장 이상 있을 때만 인정합니다.
 
 ### 개발용 우회
@@ -155,20 +159,20 @@ UI나 데모에서는 사람 친화적인 표현을 써도 되지만, 실제 계
 `VLLM_CHAT_API_KEY`, `VLLM_EMBED_API_KEY`는 로컬 무인증 endpoint라면 `EMPTY` 예시를 쓸 수 있지만, 실제 배포에서 gateway나 reverse proxy가 앞단에 있으면 유효한 토큰이 필요할 수 있습니다.
 `VLLM_CHAT_MODEL`은 배포 환경에서 실제 서빙하는 Gemma 4 계열 모델 alias를 주입합니다. 양자화 여부나 `E4B`/다른 variant 선택은 코드가 아니라 배포 설정 책임입니다.
 `VLLM_EMBED_MODEL`도 같은 방식으로 raw 설정 문자열을 그대로 사용합니다. 코드 기본값은 `BAAI/bge-m3`지만, 실제 로컬/배포 환경에서는 `bge-m3` 같은 alias를 그대로 둘 수 있습니다.
-토큰 제한, 타임아웃, 재시도 상한, RAG 조회 개수, 기본 프롬프트 보강값은 환경 정보가 아니라 내부 튜닝값이므로 `src/llm_pipeline/core/config.py` 기본값으로 관리합니다.
+토큰 제한, 타임아웃, 재시도 상한, RAG 조회 개수, 기본 프롬프트 보강값은 환경 정보가 아니라 내부 튜닝값이므로 `src/core/config.py` 기본값으로 관리합니다.
 
 ## ComfyUI 템플릿 정책
 현재 저장소에서 사용하는 ComfyUI 템플릿 파일은 아래 세 개입니다.
 
-- `comfyui_workflow/image_z_image_turbo (2).json`
+- `comfyui_workflow/image_z_image_turbo.json`
 - `comfyui_workflow/image_qwen_image_edit_2509.json`
-- `comfyui_workflow/templates-1_click_multiple_character_angles-v1.0 (3) (1).json`
+- `comfyui_workflow/templates-1_click_multiple_character_angles-v1.0.json`
 
 운영 원칙:
 - 저장소의 JSON 파일은 직접 수정 대상이 아니라 실행용 템플릿입니다.
 - Python 런타임이 템플릿을 읽은 뒤, 메모리상에서 필요한 값만 주입해 ComfyUI `/prompt`로 전송합니다.
-- 텍스트 프롬프트는 placeholder 치환으로 주입합니다.
-- 입력 이미지는 `LoadImage.inputs.image`를 교체하는 방식으로 주입합니다.
+- base 템플릿은 positive prompt만 주입하고, edit/multi-angle 템플릿은 positive/negative placeholder를 함께 치환합니다.
+- edit 템플릿은 `image1`에 메인 반지 이미지를, `image2`/`image3`에 optional 참고 이미지를 주입합니다. 참고 이미지가 비어 있으면 메인 반지 이미지를 재사용합니다.
 - 중간 생성 결과가 output URL이면 다음 단계 전에 ComfyUI input 파일로 다시 브리지합니다.
 - 템플릿 구조가 예상과 다르면 조용히 진행하지 않고 즉시 실패 처리합니다.
 
@@ -183,16 +187,20 @@ UI나 데모에서는 사람 친화적인 표현을 써도 되지만, 실제 계
 
 ## 벡터 DB 재색인
 - 임베딩 모델이 바뀌면 기존 Chroma 인덱스는 재사용하지 않습니다.
+- 코드 기준의 전환 가능한 컬렉션 슬롯은 `primary collection`과 `staging collection` 두 개입니다.
+- 현재 `active collection`은 `VECTOR_DB_PATH/active_collection.txt` 포인터 파일이 가리키는 슬롯으로 결정됩니다.
+- `backup collection`은 마지막 성공 시점의 active 컬렉션 스냅샷을 보존합니다.
+- feeder는 현재 active가 아닌 슬롯에 먼저 적재하고 검증이 끝난 뒤에만 `active_collection.txt` 포인터를 전환합니다. 문서에서 말하는 `inactive`는 독립 계약 용어가 아니라 현재 active가 아닌 슬롯을 설명하는 보조 표현입니다.
 - 아래 명령을 다시 실행해 벡터 DB를 재적재합니다.
 
 ```bash
-python -m src.llm_pipeline.scripts.db_feeder
+python -m src.scripts.db_feeder
 ```
 
 ## 빠른 호출 예시
 ```python
-from src.llm_pipeline.core.schemas import PipelineRequest
-from src.llm_pipeline.pipelines import process_generation_request
+from src.core.schemas import PipelineRequest
+from src.pipelines import process_generation_request
 
 request = PipelineRequest(
     thread_id="demo-thread",

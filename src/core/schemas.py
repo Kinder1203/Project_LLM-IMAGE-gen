@@ -30,19 +30,30 @@ def normalize_input_type(
 class PipelineRequest(BaseModel):
     input_type: RequestInputType = Field(
         "text",
-        description="입력 타입. 구형 값도 허용하지만 내부에서는 canonical 값으로 정규화됩니다.",
+        description="Raw input label. Runtime normalizes it into the canonical type from payload shape.",
     )
-    prompt: Optional[str] = Field(None, description="반지 디자인 설명 본문")
-    image_url: Optional[str] = Field(None, description="기존 반지 시안 또는 ComfyUI 업로드 이미지명")
+    prompt: Optional[str] = Field(None, description="Ring generation or customization prompt.")
+    image_url: Optional[str] = Field(
+        None,
+        description="Source ring image URL or ComfyUI input filename.",
+    )
+    engraving_reference_image_url: Optional[str] = Field(
+        None,
+        description="Optional engraving or pattern reference image for edit scenarios.",
+    )
+    gemstone_reference_image_url: Optional[str] = Field(
+        None,
+        description="Optional gemstone reference image for edit scenarios.",
+    )
 
-    thread_id: str = Field(..., description="LangGraph 세션 스레드 ID. 모든 요청에서 명시해야 합니다.")
+    thread_id: str = Field(..., description="LangGraph thread id. Required for every request.")
     action: Literal["start", "accept_base", "request_customization"] = Field(
         "start",
-        description="실행 액션 (처음 시작, 승인, 또는 커스텀 요청)",
+        description="Pipeline action.",
     )
     customization_prompt: Optional[str] = Field(
         None,
-        description="수정 요청 시 추가 각인/보석 디테일 설명",
+        description="Customization instruction used for follow-up edits.",
     )
 
     @model_validator(mode="after")
@@ -65,9 +76,9 @@ class PipelineResponse(BaseModel):
     status: ResponseStatus
     optimized_image_urls: List[str] = Field(
         default_factory=list,
-        description="TRELLIS multi-view 용으로 변환된 다각도 이미지 배열",
+        description="TRELLIS-ready multi-view image URLs.",
     )
-    message: str = Field(..., description="사용자 안내 메시지")
+    message: str = Field(..., description="User-facing status message.")
     base_image_url: Optional[str] = None
 
 
@@ -82,6 +93,8 @@ class AgentState(TypedDict):
     base_ring_image_url: str
     base_ring_image_ref: str
     customization_prompt: str
+    engraving_reference_image_url: str
+    gemstone_reference_image_url: str
     customization_context: str
     customization_kind: str
     expected_engraving_text: str
