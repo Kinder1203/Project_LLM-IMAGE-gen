@@ -43,7 +43,7 @@ class RingVectorRAG:
             )
         else:
             self.vector_store = None
-            logger.warning("Vector DB not found! Please run `scripts/db_feeder.py` first.")
+            logger.warning("Vector DB not found! Please run `python -m src.scripts.db_feeder` first.")
 
     def search_ring_rules(self, query: str, top_k: int | None = None) -> str:
         """가장 연관성이 높은 반지 소재 지식이나 프롬프트 팁을 문자열로 반환"""
@@ -93,5 +93,5 @@ def retrieve_ring_context(state: AgentState) -> dict:
     rag_engine = _get_rag_engine(config.VECTOR_DB_PATH, config.VLLM_EMBED_MODEL, collection_name)
     real_context = rag_engine.search_ring_rules(prompt, top_k=config.RAG_DEFAULT_TOP_K)
 
-    logger.info(f"Retrieved 3D Control Rules Length: {len(real_context)}")
+    logger.info(f"Retrieved multi-view control rules length: {len(real_context)}")
     return {"rag_context": real_context}

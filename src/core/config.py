@@ -40,9 +40,9 @@ class InternalConfigDefaults:
     IMAGE_DOWNLOAD_TIMEOUT_SECONDS = 10
     IMAGE_BRIDGE_DOWNLOAD_TIMEOUT_SECONDS = 20
 
-    # TRELLIS-style prompt additions kept neutral to avoid conflicting with
-    # the complementary-background rule used before rembg.
-    TRELLIS_REQUIRED_PROMPT = (
+    # Multi-view prompt additions stay neutral so they do not fight the
+    # complementary-background rule used before background removal.
+    MULTI_VIEW_REQUIRED_PROMPT = (
         ", isolated product render, high resolution, clean silhouette, "
         "studio lighting, orthographic view, highly detailed"
     )
@@ -90,7 +90,7 @@ class Config:
         self.COMFYUI_POLL_INTERVAL_SECONDS = InternalConfigDefaults.COMFYUI_POLL_INTERVAL_SECONDS
         self.IMAGE_DOWNLOAD_TIMEOUT_SECONDS = InternalConfigDefaults.IMAGE_DOWNLOAD_TIMEOUT_SECONDS
         self.IMAGE_BRIDGE_DOWNLOAD_TIMEOUT_SECONDS = InternalConfigDefaults.IMAGE_BRIDGE_DOWNLOAD_TIMEOUT_SECONDS
-        self.TRELLIS_REQUIRED_PROMPT = InternalConfigDefaults.TRELLIS_REQUIRED_PROMPT
+        self.MULTI_VIEW_REQUIRED_PROMPT = InternalConfigDefaults.MULTI_VIEW_REQUIRED_PROMPT
         self.MULTI_VIEW_VALIDATION_SAMPLE_COUNT = InternalConfigDefaults.MULTI_VIEW_VALIDATION_SAMPLE_COUNT
         self.BASE_VALIDATION_MAX_RETRIES = InternalConfigDefaults.BASE_VALIDATION_MAX_RETRIES
         self.EDIT_VALIDATION_MAX_RETRIES = InternalConfigDefaults.EDIT_VALIDATION_MAX_RETRIES

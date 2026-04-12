@@ -44,6 +44,6 @@ def write_active_collection_name(
     return pointer
 
 
-def inactive_collection_name(active_collection_name: str) -> str:
+def standby_collection_name(active_collection_name: str) -> str:
     primary_collection, staging_collection = vector_collection_slots()
     return staging_collection if active_collection_name == primary_collection else primary_collection

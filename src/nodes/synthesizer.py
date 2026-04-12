@@ -512,7 +512,7 @@ def _enforce_background_contrast(prompt: str, source_text: str) -> str:
     background_spec = _infer_background_spec(source_text)
     enforced = _dedupe_prompt_segments(
         prompt,
-        config.TRELLIS_REQUIRED_PROMPT,
+        config.MULTI_VIEW_REQUIRED_PROMPT,
         "perfectly isolated jewelry subject",
         "extremely strong silhouette separation",
         f"single flat {background_spec} studio background",
@@ -982,9 +982,9 @@ def generate_base_image(state: AgentState) -> dict:
     subject_guidance = _requested_ring_count_guidance(user_prompt)
     retry_directive = _build_base_retry_directive(user_prompt, validation_reason, retry_count)
     subject_instruction = (
-        "Keep the requested rings as the only subjects, centered, isolated, fully visible, side by side, equally prominent, and suitable for rembg/TRELLIS extraction."
+        "Keep the requested rings as the only subjects, centered, isolated, fully visible, side by side, equally prominent, and suitable for clean background removal and multi-view generation."
         if _mentions_multi_ring_request(user_prompt)
-        else "Keep the ring as the only subject, centered, isolated, and suitable for rembg/TRELLIS extraction."
+        else "Keep the ring as the only subject, centered, isolated, and suitable for clean background removal and multi-view generation."
     )
 
     logger.info("Enhancing prompt using vLLM chat model & RAG rules...")
@@ -1030,7 +1030,7 @@ No conversational text and no quotes.
         logger.warning(f"Prompt enhancement failed: {exc}. Using original prompt.")
         enhanced_prompt = _dedupe_prompt_segments(
             user_prompt,
-            config.TRELLIS_REQUIRED_PROMPT,
+            config.MULTI_VIEW_REQUIRED_PROMPT,
             f"single flat {background_spec} studio background",
             "background color must strongly contrast with the ring material",
             "clearly visible empty inner hole",

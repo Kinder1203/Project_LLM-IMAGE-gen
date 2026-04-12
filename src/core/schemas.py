@@ -76,7 +76,7 @@ class PipelineResponse(BaseModel):
     status: ResponseStatus
     optimized_image_urls: List[str] = Field(
         default_factory=list,
-        description="TRELLIS-ready multi-view image URLs.",
+        description="Validated multi-view image URLs.",
     )
     message: str = Field(..., description="User-facing status message.")
     base_image_url: Optional[str] = None

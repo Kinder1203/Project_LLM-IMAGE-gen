@@ -284,7 +284,7 @@ def validate_rembg(state: AgentState) -> dict:
         }
 
     sys_prompt = (
-        "You are a TRELLIS preparation judge. Look at this ring image. "
+        "You are a multi-view asset preparation judge. Look at this ring image. "
         "Is the background completely removed (transparent alpha), and more importantly, "
         "is the inner hole of the ring completely hollowed out without background artifact "
         "remaining? Return JSON {'is_valid': true/false, 'reason': '...'}."

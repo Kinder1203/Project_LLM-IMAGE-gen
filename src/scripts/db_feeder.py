@@ -4,7 +4,7 @@ from loguru import logger
 
 from ..core.config import config
 from ..core.vector_db_runtime import (
-    inactive_collection_name,
+    standby_collection_name,
     resolve_active_collection_name,
     write_active_collection_name,
 )
@@ -98,7 +98,7 @@ CURATED_RULES = [
         "content": (
             "The empty hole inside the ring must remain visually separate from the background after "
             "generation and editing. If the background bleeds into the band opening or reflections "
-            "fill the hole, rembg and TRELLIS preparation should reject the image."
+            "fill the hole, background removal and multi-view preparation should reject the image."
         ),
     },
     {
@@ -455,7 +455,7 @@ def init_vector_db(reset_collection: bool = True):
     """
     Build the curated Chroma collection used by the ring prompt/validation pipeline.
 
-    By default the feeder writes into the inactive collection slot, verifies the
+    By default the feeder writes into the standby collection slot, verifies the
     ingest count, refreshes the backup from the previous active slot, and only then
     flips the active collection pointer.
     """
@@ -468,16 +468,16 @@ def init_vector_db(reset_collection: bool = True):
     target_collection = current_active_collection
 
     if reset_collection:
-        target_collection = inactive_collection_name(current_active_collection)
+        target_collection = standby_collection_name(current_active_collection)
         _reset_collection(str(db_path), target_collection)
         logger.info(
             "Safe refresh enabled: "
-            f"building inactive slot '{target_collection}' while keeping "
+            f"building standby slot '{target_collection}' while keeping "
             f"active slot '{current_active_collection}' online."
         )
     else:
         logger.warning(
-            "reset_collection=False bypasses the safe slot swap and writes directly into the active collection."
+            "reset_collection=False bypasses the safe active/standby swap and writes directly into the active collection."
         )
 
     vector_store = _build_vector_store(str(db_path), collection_name=target_collection)
