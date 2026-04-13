@@ -10,7 +10,11 @@
   },
   "31": {
     "inputs": {
-      "filename_prefix": "ComfyUI-close_up"
+      "filename_prefix": "ComfyUI-close_up",
+      "images": [
+        "146",
+        0
+      ]
     },
     "class_type": "SaveImage",
     "_meta": {
@@ -21,7 +25,7 @@
     "inputs": {
       "filename_prefix": "ComfyUI-wide_shot",
       "images": [
-        "140",
+        "148",
         0
       ]
     },
@@ -34,7 +38,7 @@
     "inputs": {
       "filename_prefix": "ComfyUI-45_right",
       "images": [
-        "141",
+        "150",
         0
       ]
     },
@@ -47,7 +51,7 @@
     "inputs": {
       "filename_prefix": "ComfyUI-90_right",
       "images": [
-        "142",
+        "152",
         0
       ]
     },
@@ -92,80 +96,136 @@
       "title": "Prompt 45deg right"
     }
   },
-  "139": {
+  "144": {
     "inputs": {
-      "model": "BiRefNet-matting",
-      "mask_blur": 0,
-      "mask_offset": 0,
-      "invert_output": false,
-      "refine_foreground": true,
-      "background": "Alpha",
-      "background_color": "#222222",
+      "version": "BiRefNet-General"
+    },
+    "class_type": "LayerMask: LoadBiRefNetModelV2",
+    "_meta": {
+      "title": "LayerMask: Load BiRefNet Model V2(Advance)"
+    }
+  },
+  "146": {
+    "inputs": {
+      "detail_method": "VITMatte",
+      "detail_erode": 4,
+      "detail_dilate": 2,
+      "black_point": 0.01,
+      "white_point": 0.99,
+      "process_detail": false,
+      "device": "cuda",
+      "max_megapixels": 2,
       "image": [
         "65:33:19",
         0
+      ],
+      "birefnet_model": [
+        "144",
+        0
       ]
     },
-    "class_type": "BiRefNetRMBG",
+    "class_type": "LayerMask: BiRefNetUltraV2",
     "_meta": {
-      "title": "BiRefNet (RMBG)"
+      "title": "LayerMask: BiRefNet Ultra V2(Advance)"
     }
   },
-  "140": {
+  "147": {
     "inputs": {
-      "model": "BiRefNet-matting",
-      "mask_blur": 0,
-      "mask_offset": 0,
-      "invert_output": false,
-      "refine_foreground": true,
-      "background": "Alpha",
-      "background_color": "#222222",
+      "version": "BiRefNet-General"
+    },
+    "class_type": "LayerMask: LoadBiRefNetModelV2",
+    "_meta": {
+      "title": "LayerMask: Load BiRefNet Model V2(Advance)"
+    }
+  },
+  "148": {
+    "inputs": {
+      "detail_method": "VITMatte",
+      "detail_erode": 22,
+      "detail_dilate": 2,
+      "black_point": 0.01,
+      "white_point": 0.99,
+      "process_detail": false,
+      "device": "cuda",
+      "max_megapixels": 2,
       "image": [
         "65:35:80",
         0
+      ],
+      "birefnet_model": [
+        "147",
+        0
       ]
     },
-    "class_type": "BiRefNetRMBG",
+    "class_type": "LayerMask: BiRefNetUltraV2",
     "_meta": {
-      "title": "BiRefNet (RMBG)"
+      "title": "LayerMask: BiRefNet Ultra V2(Advance)"
     }
   },
-  "141": {
+  "149": {
     "inputs": {
-      "model": "BiRefNet-matting",
-      "mask_blur": 0,
-      "mask_offset": 0,
-      "invert_output": false,
-      "refine_foreground": true,
-      "background": "Alpha",
-      "background_color": "#222222",
+      "version": "BiRefNet-General"
+    },
+    "class_type": "LayerMask: LoadBiRefNetModelV2",
+    "_meta": {
+      "title": "LayerMask: Load BiRefNet Model V2(Advance)"
+    }
+  },
+  "150": {
+    "inputs": {
+      "detail_method": "VITMatte",
+      "detail_erode": 4,
+      "detail_dilate": 2,
+      "black_point": 0.01,
+      "white_point": 0.99,
+      "process_detail": false,
+      "device": "cuda",
+      "max_megapixels": 2,
       "image": [
         "65:37:89",
         0
-      ]
-    },
-    "class_type": "BiRefNetRMBG",
-    "_meta": {
-      "title": "BiRefNet (RMBG)"
-    }
-  },
-  "142": {
-    "inputs": {
-      "model": "BiRefNet-matting",
-      "mask_blur": 0,
-      "mask_offset": 0,
-      "invert_output": false,
-      "refine_foreground": true,
-      "background": "Alpha",
-      "background_color": "#222222",
-      "image": [
-        "65:39:98",
+      ],
+      "birefnet_model": [
+        "149",
         0
       ]
     },
-    "class_type": "BiRefNetRMBG",
+    "class_type": "LayerMask: BiRefNetUltraV2",
     "_meta": {
-      "title": "BiRefNet (RMBG)"
+      "title": "LayerMask: BiRefNet Ultra V2(Advance)"
+    }
+  },
+  "151": {
+    "inputs": {
+      "version": "BiRefNet-General"
+    },
+    "class_type": "LayerMask: LoadBiRefNetModelV2",
+    "_meta": {
+      "title": "LayerMask: Load BiRefNet Model V2(Advance)"
+    }
+  },
+  "152": {
+    "inputs": {
+      "detail_method": "VITMatte",
+      "detail_erode": 4,
+      "detail_dilate": 2,
+      "black_point": 0.01,
+      "white_point": 0.99,
+      "process_detail": false,
+      "device": "cuda",
+      "max_megapixels": 2,
+      "image": [
+        "65:39:98",
+        0
+      ],
+      "birefnet_model": [
+        "151",
+        0
+      ]
+    },
+    "class_type": "LayerMask: BiRefNetUltraV2",
+    "_meta": {
+      "title": "LayerMask: BiRefNet Ultra V2(Advance)"
     }
   },
   "48:9": {
